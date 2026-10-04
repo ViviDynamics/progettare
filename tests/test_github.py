@@ -180,3 +180,23 @@ def test_the_state_recheck_aborts_a_closed_issue(
     install_gh(monkeypatch, tmp_path, gh_cat(str(payload)))
     with pytest.raises(IssueClosedError, match="CLOSED"):
         ensure_issue_open(REF)
+
+
+def test_missing_issue_fields_are_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = tmp_path / "issue.json"
+    payload.write_text(json.dumps({"state": "OPEN"}))
+    install_gh(monkeypatch, tmp_path, gh_cat(str(payload)))
+    with pytest.raises(IssueFetchError, match="issue fields in an unreadable shape"):
+        load_issue(REF)
+
+
+def test_a_number_mismatch_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = tmp_path / "issue.json"
+    payload.write_text(canned_issue(2))
+    install_gh(monkeypatch, tmp_path, gh_cat(str(payload)))
+    with pytest.raises(IssueFetchError, match="when asked for #1"):
+        load_issue(REF)

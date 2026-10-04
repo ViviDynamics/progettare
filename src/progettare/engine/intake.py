@@ -53,7 +53,7 @@ _MARKER_RE = re.compile(
 # the shape the family writes ("Done When:", "Implementation Notes:"),
 # including the bold-wrapped spelling some bodies use.
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+")
-_LABEL_RE = re.compile(r"^\s*(?:\*\*)?[A-Z][A-Za-z0-9 ' /_-]{2,40}:\*{0,2}\s*$")
+_LABEL_RE = re.compile(r"^\s*(?:\*\*)?[A-Z][A-Za-z0-9 ' /_-]{1,40}:\*{0,2}\s*$")
 
 _LIST_ITEM_RE = re.compile(
     r"^\s*(?:[-*+](?:\s+(?:\[[ xX]\]\s*)?|\s*$)|\d+[.)](?:\s+|\s*$))"

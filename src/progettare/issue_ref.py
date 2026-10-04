@@ -67,10 +67,15 @@ def parse_issue_ref(text: str) -> IssueRef:
                 f"{candidate} is not a GitHub issue URL of the form "
                 "https://github.com/owner/repo/issues/123"
             )
+        number = int(match.group("number"))
+        if number < 1:
+            raise IssueRefError(
+                f"{candidate} names issue {number}; GitHub numbers start at 1"
+            )
         return IssueRef(
             owner=match.group("owner"),
             repo=match.group("repo"),
-            number=int(match.group("number")),
+            number=number,
         )
     match = _SHORT_RE.match(candidate)
     if match is None:
@@ -78,8 +83,13 @@ def parse_issue_ref(text: str) -> IssueRef:
             f"{candidate} is not an issue reference of the form "
             "owner/repo#123 or an issue URL"
         )
+    number = int(match.group("number"))
+    if number < 1:
+        raise IssueRefError(
+            f"{candidate} names issue {number}; GitHub numbers start at 1"
+        )
     return IssueRef(
         owner=match.group("owner"),
         repo=match.group("repo"),
-        number=int(match.group("number")),
+        number=number,
     )

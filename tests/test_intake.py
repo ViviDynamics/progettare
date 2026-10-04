@@ -263,3 +263,17 @@ def test_a_relative_repo_path_is_stored_resolved(
     monkeypatch.chdir(tmp_path)
     context = assemble(make_issue(body), ".")
     assert context.repo_path == str(tmp_path.resolve())
+
+
+def test_a_two_character_label_terminates_the_section() -> None:
+    body = "\n".join(
+        [
+            "Acceptance:",
+            "- ships intake.json",
+            "",
+            "QA:",
+            "- survives a second run",
+        ]
+    )
+    criteria = parse_acceptance_criteria(body)
+    assert criteria == ("ships intake.json",)

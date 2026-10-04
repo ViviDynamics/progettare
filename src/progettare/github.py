@@ -73,17 +73,32 @@ def parse_issue_payload(ref: IssueRef, payload: Any) -> Issue:
     state = payload.get("state")
     if state not in ("OPEN", "CLOSED"):
         raise IssueFetchError(f"gh reported an unreadable issue state: {state!r}")
+    number = payload.get("number")
+    title = payload.get("title")
+    body = payload.get("body")
+    url = payload.get("url")
+    if (
+        not isinstance(number, int)
+        or not isinstance(title, str)
+        or not isinstance(body, str)
+        or not isinstance(url, str)
+    ):
+        raise IssueFetchError("gh returned issue fields in an unreadable shape")
+    if number != ref.number:
+        raise IssueFetchError(
+            f"gh returned issue #{number} when asked for #{ref.number}"
+        )
     raw_comments = payload.get("comments")
     if raw_comments is not None and not isinstance(raw_comments, list):
         raise IssueFetchError("gh returned comments in an unreadable shape")
     return Issue(
         owner=ref.owner,
         repo=ref.repo,
-        number=int(payload.get("number") or ref.number),
-        title=str(payload.get("title") or ""),
-        body=str(payload.get("body") or ""),
+        number=number,
+        title=title,
+        body=body,
         state=str(state),
-        url=str(payload.get("url") or ""),
+        url=url,
         comments=tuple(_parse_comment(raw) for raw in (raw_comments or [])),
     )
 
