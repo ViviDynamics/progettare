@@ -12,10 +12,17 @@ license = "LicenseRef-Elastic-License-2.0"
 license-files = ["LICENSE", "NOTICE"]
 # Intake and the run artifacts are stdlib-only; model calls arrive later and
 # go through the nare CLI as a subprocess, never through an import here.
-dependencies = []
+dependencies = [
+    "pyyaml>=6.0.3",
+]
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "types-pyyaml>=6.0.12.20260906",
+]
 
 # The version comes from the git tag the release workflow minted, mirroring
 # nare, so a wheel's metadata cannot drift from the release it was built at.
