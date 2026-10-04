@@ -66,7 +66,7 @@ def _require_dict(data: Any, key: str) -> dict[str, Any]:
 
 
 def _require_keys(section: dict[str, Any], known: tuple[str, ...], path: str) -> None:
-    unknown = sorted(set(section) - set(known))
+    unknown = sorted(set(section) - set(known), key=str)
     if unknown:
         names = ", ".join(f"{path}.{key}" if path else str(key) for key in unknown)
         raise ConfigError(f"unknown key(s): {names}")
@@ -105,9 +105,9 @@ def _require_str(section: dict[str, Any], key: str) -> str:
 
 
 def _optional_str(section: dict[str, Any], key: str) -> str | None:
-    value = section.get(_leaf(key))
-    if value is None:
+    if _leaf(key) not in section:
         return None
+    value = section[_leaf(key)]
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(
             f"{key} must be a non-empty string, got {type(value).__name__}"

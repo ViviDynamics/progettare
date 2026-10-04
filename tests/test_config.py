@@ -272,6 +272,45 @@ def test_document_that_is_a_list_is_refused(tmp_path: pathlib.Path) -> None:
         load_config(path)
 
 
+def test_mixed_type_unknown_keys_still_name_the_paths(
+    tmp_path: pathlib.Path,
+) -> None:
+    text = SPEC_EXAMPLE.replace(
+        "  max_questions: 12\n", "  max_questions: 12\n  extra: 1\n  7: 2\n"
+    )
+    with pytest.raises(
+        ConfigError, match=r"unknown key\(s\): survey\.7, survey\.extra"
+    ):
+        load_config(write_config(tmp_path, text))
+
+
+def test_explicit_null_base_url_in_default_is_refused(
+    tmp_path: pathlib.Path,
+) -> None:
+    text = SPEC_EXAMPLE.replace(
+        "    provider: anthropic\n    model: claude-best\n",
+        "    provider: anthropic\n    model: claude-best\n    base_url: null\n",
+    )
+    with pytest.raises(
+        ConfigError, match="models.default.base_url must be a non-empty string"
+    ):
+        load_config(write_config(tmp_path, text))
+
+
+def test_explicit_null_base_url_in_override_is_refused(
+    tmp_path: pathlib.Path,
+) -> None:
+    text = SPEC_EXAMPLE.replace(
+        "      model: cheap-survey-model\n",
+        "      model: cheap-survey-model\n      base_url: null\n",
+    )
+    with pytest.raises(
+        ConfigError,
+        match="models.overrides.survey.base_url must be a non-empty string",
+    ):
+        load_config(write_config(tmp_path, text))
+
+
 def test_models_section_missing_names_the_key(tmp_path: pathlib.Path) -> None:
     text = SPEC_EXAMPLE.replace(
         """models:

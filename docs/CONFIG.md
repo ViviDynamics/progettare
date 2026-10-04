@@ -92,6 +92,9 @@ Sizing thresholds the size stage applies to a blueprint.
 - Wrong types are rejected: integers must be integers (a YAML `true` is a
   boolean, not an integer), strings must be non-empty strings, and each
   section must be a mapping.
+- An optional key written with an explicit null value, such as
+  `base_url: null`, is rejected like any other wrong type; omit the key
+  instead of setting it to null.
 - Numbers below their minimum are rejected; the minimum is 1 everywhere
   except `size.documenter_min_topics`, which may be 0.
 - A file that does not exist, does not parse as YAML, or does not start with
