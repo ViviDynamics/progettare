@@ -75,8 +75,9 @@ Within `models.overrides.<stage>`, `provider`, `model`, and `base_url` are
 all optional; when present they replace the `default` value. Setting
 `base_url` to an explicit `null` in an override is an explicit reset: the
 stage calls through the provider's own endpoint even though `default` set
-one. A null `base_url` inside `models.default` is still rejected, since a
-default rail must name where it points.
+one. Inside `models.default`, `base_url` is optional (omitting it selects
+the provider's own endpoint), but a value that is present must be a
+non-empty string, so `base_url: null` there is rejected.
 
 ### `size`
 

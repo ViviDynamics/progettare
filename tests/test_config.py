@@ -301,6 +301,10 @@ def test_null_base_url_in_override_is_an_explicit_reset(
     tmp_path: pathlib.Path,
 ) -> None:
     text = SPEC_EXAMPLE.replace(
+        "    provider: anthropic\n    model: claude-best\n",
+        "    provider: anthropic\n    model: claude-best\n"
+        "    base_url: https://default.internal/v1\n",
+    ).replace(
         "    blueprint:\n      model: even-better\n",
         "    blueprint:\n      model: even-better\n      base_url: null\n",
     )
