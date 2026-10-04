@@ -277,3 +277,43 @@ def test_a_two_character_label_terminates_the_section() -> None:
     )
     criteria = parse_acceptance_criteria(body)
     assert criteria == ("ships intake.json",)
+
+
+def test_a_lowercase_label_terminates_the_section() -> None:
+    body = "\n".join(
+        [
+            "Acceptance:",
+            "- ships intake.json",
+            "",
+            "notes:",
+            "- survives a second run",
+        ]
+    )
+    criteria = parse_acceptance_criteria(body)
+    assert criteria == ("ships intake.json",)
+
+
+def test_a_single_character_label_terminates_the_section() -> None:
+    body = "\n".join(
+        [
+            "Acceptance:",
+            "- ships intake.json",
+            "",
+            "A:",
+            "- survives a second run",
+        ]
+    )
+    criteria = parse_acceptance_criteria(body)
+    assert criteria == ("ships intake.json",)
+
+
+def test_an_indented_word_line_keeps_feeding_the_criterion() -> None:
+    body = "\n".join(
+        [
+            "Acceptance:",
+            "- ships intake.json",
+            "  note: the file lands in the run directory",
+        ]
+    )
+    criteria = parse_acceptance_criteria(body)
+    assert criteria == ("ships intake.json note: the file lands in the run directory",)

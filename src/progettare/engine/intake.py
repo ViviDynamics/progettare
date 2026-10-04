@@ -51,9 +51,11 @@ _MARKER_RE = re.compile(
 
 # A line that closes the section: a markdown heading, or a "Label:" line of
 # the shape the family writes ("Done When:", "Implementation Notes:"),
-# including the bold-wrapped spelling some bodies use.
+# including the bold-wrapped spelling some bodies use. Labels are flush-left
+# and one letter or more, so an indented continuation line ("  note: ...")
+# keeps feeding the criterion it wraps.
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+")
-_LABEL_RE = re.compile(r"^\s*(?:\*\*)?[A-Z][A-Za-z0-9 ' /_-]{1,40}:\*{0,2}\s*$")
+_LABEL_RE = re.compile(r"^(?:\*\*)?[A-Za-z][A-Za-z0-9 ' /_-]{0,40}:\*{0,2}\s*$")
 
 _LIST_ITEM_RE = re.compile(
     r"^\s*(?:[-*+](?:\s+(?:\[[ xX]\]\s*)?|\s*$)|\d+[.)](?:\s+|\s*$))"
