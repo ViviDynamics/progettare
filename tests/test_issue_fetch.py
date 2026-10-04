@@ -154,7 +154,7 @@ def test_gh_runner_raises_gh_error_on_non_zero_exit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_run(args: list[str], **kwargs: object) -> FakeCompleted:
-        return FakeCompleted(1, "", "boom")
+        raise subprocess.CalledProcessError(1, args, output="", stderr="boom")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
@@ -164,19 +164,3 @@ def test_gh_runner_raises_gh_error_on_non_zero_exit(
     assert excinfo.value.command == EXPECTED_COMMAND
     assert excinfo.value.exit_code == 1
     assert excinfo.value.stderr == "boom"
-
-
-def test_gh_runner_converts_called_process_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fake_run(args: list[str], **kwargs: object) -> FakeCompleted:
-        raise subprocess.CalledProcessError(2, args, output="", stderr="bad")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-
-    with pytest.raises(GhError) as excinfo:
-        gh_runner(EXPECTED_COMMAND)
-
-    assert excinfo.value.command == EXPECTED_COMMAND
-    assert excinfo.value.exit_code == 2
-    assert excinfo.value.stderr == "bad"

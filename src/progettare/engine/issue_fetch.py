@@ -61,8 +61,6 @@ def gh_runner(command: list[str]) -> str:
         completed = subprocess.run(command, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as error:
         raise GhError(command, error.returncode, error.stderr or "") from error
-    if completed.returncode != 0:
-        raise GhError(command, completed.returncode, completed.stderr)
     return completed.stdout
 
 
