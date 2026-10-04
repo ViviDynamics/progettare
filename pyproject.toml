@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling>=1.27", "hatch-vcs>=0.4"]
+build-backend = "hatchling.build"
+
+[project]
+name = "progettare"
+dynamic = ["version"]
+description = "A technical-planning agent harness: bounded survey, one blueprint, ceremony decided by code."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "LicenseRef-Elastic-License-2.0"
+license-files = ["LICENSE", "NOTICE"]
+# Intake and the run artifacts are stdlib-only; model calls arrive later and
+# go through the nare CLI as a subprocess, never through an import here.
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]
+
+# The version comes from the git tag the release workflow minted, mirroring
+# nare, so a wheel's metadata cannot drift from the release it was built at.
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/progettare/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/progettare"]
+
+[tool.ruff]
+line-length = 88
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "tests"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
