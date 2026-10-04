@@ -10,3 +10,5 @@ build/
 .coverage
 coverage.xml
 *.session.json
+.runs/
+src/progettare/_version.py
