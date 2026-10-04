@@ -1,3 +1,7 @@
+from pathlib import Path
+
+import pytest
+
 from progettare.engine.intake import (
     assemble,
     find_conflicts,
@@ -249,4 +253,13 @@ def test_assemble_reports_ok_when_the_card_is_actionable() -> None:
         "Intake writes intake.json",
         "Intake spends no model calls",
     )
-    assert context.repo_path == "/tmp"
+    assert context.repo_path == str(Path("/tmp").resolve())
+
+
+def test_a_relative_repo_path_is_stored_resolved(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    body = "Acceptance:\n- Intake writes intake.json"
+    monkeypatch.chdir(tmp_path)
+    context = assemble(make_issue(body), ".")
+    assert context.repo_path == str(tmp_path.resolve())

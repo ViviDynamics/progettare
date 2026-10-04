@@ -270,7 +270,7 @@ def _validate_repo_path(repo_path: str) -> Path:
     path = Path(repo_path).expanduser()
     if not path.is_dir():
         raise RepoPathError(f"repo path {repo_path} is not a directory")
-    return path
+    return path.resolve()
 
 
 def assemble(issue: Issue, repo_path: str) -> CardContext:
