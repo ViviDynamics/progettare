@@ -45,6 +45,9 @@ def _parse_url(parsed: ParseResult) -> IssueRef:
         raise IssueRefError(
             f"A pull request is not an issue. Accepted forms: {_ACCEPTED_FORMS}."
         )
+    has_extra = bool(parsed.query) or bool(parsed.fragment)
+    if has_extra or "@" in parsed.netloc or ":" in parsed.netloc:
+        raise IssueRefError(_invalid_message())
     if path.endswith("/"):
         path = path[:-1]
     match = _URL_RE.fullmatch(path)

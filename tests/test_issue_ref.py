@@ -108,3 +108,23 @@ def test_issue_ref_is_frozen() -> None:
 
 def test_issue_ref_error_is_value_error() -> None:
     assert issubclass(IssueRefError, ValueError)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "https://github.com/octo-org/repo/issues/123?foo=bar",
+        "https://github.com/octo-org/repo/issues/123#anchor",
+        "https://github.com:443/octo-org/repo/issues/123",
+        "https://user@github.com/octo-org/repo/issues/123",
+    ],
+)
+def test_url_forms_outside_the_contract_raise(text: str) -> None:
+    with pytest.raises(IssueRefError):
+        parse_issue_ref(text)
+
+
+def test_case_insensitive_scheme_and_host_parse() -> None:
+    ref = parse_issue_ref("HTTPS://GitHub.com/octo-org/repo/issues/123")
+
+    assert ref == IssueRef(owner="octo-org", repo="repo", number=123)
