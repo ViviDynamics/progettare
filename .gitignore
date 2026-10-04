@@ -10,3 +10,5 @@ build/
 .coverage
 coverage.xml
 *.session.json
+.agents/state/
+repo.env

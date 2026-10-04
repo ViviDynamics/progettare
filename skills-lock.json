@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "skills": {
+    "ci-safety": {
+      "source": "ViviDynamics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/ci-safety/SKILL.md",
+      "computedHash": "0aefae557f5ddc497b9b1bcbd381775ac8b18d024ef67bb44a98de4bc4e6bf76"
+    },
+    "copilot-review": {
+      "source": "ViviDynamics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/copilot-review/SKILL.md",
+      "computedHash": "008323e0a60dca5a8ecab36d728f16af51448d261ef8a4d839ba7d1ae7025f9e"
+    },
+    "merge-pr": {
+      "source": "ViviDynamics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/merge-pr/SKILL.md",
+      "computedHash": "d642448bba73ed04b7e2aa208d08e8406bb86f8bb3bc543fa62a8b8aaa8beb4d"
+    },
+    "rebase-main": {
+      "source": "ViviDynamics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/rebase-main/SKILL.md",
+      "computedHash": "fe469482dbfcc59f595c39ab75ac01dbebfcbd4ea597cb52c92a4c84ea869c7a"
+    },
+    "ship-issue": {
+      "source": "ViviDynamics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/ship-issue/SKILL.md",
+      "computedHash": "ad0377074959cafa78cd82371249187a821f81f58823c701d1a963090d5f675f"
+    },
+    "vivi-conventions": {
+      "source": "ViviDynamics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/vivi-conventions/SKILL.md",
+      "computedHash": "3a0d9453bc597dd67e708f13fc40bd219449486619df30ed6311fa11e0061293"
+    },
+    "watch-ci": {
+      "source": "ViviDynamics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/watch-ci/SKILL.md",
+      "computedHash": "01d0af2aaab624a8e9da339fb2c2535710b5cfb885b5e8d50c3d614c3769cb2a"
+    },
+    "watch-ci-main": {
+      "source": "ViviDynamics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/watch-ci-main/SKILL.md",
+      "computedHash": "3eb10852e69c18383b65c006795591586e8e099e66ef99ac8d9b7b662c1ba8ae"
+    }
+  }
+}
