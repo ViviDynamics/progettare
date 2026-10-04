@@ -66,8 +66,10 @@ def _parse_comment(raw: Any) -> IssueComment:
     )
 
 
-def parse_issue_payload(ref: IssueRef, payload: dict[str, Any]) -> Issue:
+def parse_issue_payload(ref: IssueRef, payload: Any) -> Issue:
     """The one place gh's JSON becomes data, checked at the boundary."""
+    if not isinstance(payload, dict):
+        raise IssueFetchError("gh returned an unreadable issue payload")
     state = payload.get("state")
     if state not in ("OPEN", "CLOSED"):
         raise IssueFetchError(f"gh reported an unreadable issue state: {state!r}")

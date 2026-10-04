@@ -151,6 +151,21 @@ def test_an_all_blank_section_asks_the_general_question() -> None:
     assert "acceptance criteria" in context.blocked_questions[0]
 
 
+def test_a_bare_checkbox_blocks_as_a_placeholder() -> None:
+    body = "Acceptance:\n- Implement X\n- [ ]"
+    context = assemble(make_issue(body), "/tmp")
+    assert context.status == "blocked"
+    assert len(context.blocked_questions) == 1
+    assert "criterion 2 is a placeholder" in context.blocked_questions[0]
+
+
+def test_the_na_spelling_blocks_as_a_placeholder() -> None:
+    body = "Acceptance:\n- Implement X\n- N.A."
+    context = assemble(make_issue(body), "/tmp")
+    assert context.status == "blocked"
+    assert "criterion 2 is a placeholder" in context.blocked_questions[0]
+
+
 def test_different_modals_do_not_conflict() -> None:
     body = "\n".join(
         [

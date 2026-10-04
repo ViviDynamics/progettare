@@ -26,7 +26,7 @@ _PLACEHOLDERS = {
     "…",
     "...",
     "n/a",
-    "n.a.",
+    "n.a",
     "na",
     "tbd",
     "tba",
@@ -55,7 +55,7 @@ _MARKER_RE = re.compile(
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+")
 _LABEL_RE = re.compile(r"^\s*(?:\*\*)?[A-Z][A-Za-z0-9 ' /_-]{2,40}:\*{0,2}\s*$")
 
-_LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)")
+_LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]\s+(?:\[[ xX]\]\s*)?|\d+[.)]\s+)")
 _CHECKBOX_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\]\s*")
 _CONTINUATION_RE = re.compile(r"^\s+\S")
 
