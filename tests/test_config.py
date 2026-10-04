@@ -297,18 +297,45 @@ def test_explicit_null_base_url_in_default_is_refused(
         load_config(write_config(tmp_path, text))
 
 
-def test_explicit_null_base_url_in_override_is_refused(
+def test_null_base_url_in_override_is_an_explicit_reset(
     tmp_path: pathlib.Path,
 ) -> None:
     text = SPEC_EXAMPLE.replace(
-        "      model: cheap-survey-model\n",
-        "      model: cheap-survey-model\n      base_url: null\n",
+        "    blueprint:\n      model: even-better\n",
+        "    blueprint:\n      model: even-better\n      base_url: null\n",
+    )
+    config = load_config(write_config(tmp_path, text))
+    assert config.blueprint_rail == ModelRail(
+        provider="anthropic", model="even-better", base_url=None
+    )
+    assert config.survey_rail.base_url == "https://litellm.internal/v1"
+
+
+def test_duplicate_top_level_keys_are_refused(tmp_path: pathlib.Path) -> None:
+    text = SPEC_EXAMPLE.replace(
+        "  run_max_tokens: 300000\n",
+        "  run_max_tokens: 300000\n  run_max_tokens: 1\n",
     )
     with pytest.raises(
-        ConfigError,
-        match="models.overrides.survey.base_url must be a non-empty string",
+        ConfigError, match="has duplicate mapping keys: repeated mapping key"
     ):
         load_config(write_config(tmp_path, text))
+
+
+def test_duplicate_nested_keys_are_refused(tmp_path: pathlib.Path) -> None:
+    text = SPEC_EXAMPLE.replace(
+        "      model: cheap-survey-model\n",
+        "      model: cheap-survey-model\n      model: another-model\n",
+    )
+    with pytest.raises(ConfigError, match="repeated mapping key 'model'"):
+        load_config(write_config(tmp_path, text))
+
+
+def test_invalid_utf8_names_the_file(tmp_path: pathlib.Path) -> None:
+    path = tmp_path / "progettare.yaml"
+    path.write_bytes(b"survey:\n  max_questions: \xff\xfe\n")
+    with pytest.raises(ConfigError, match="is not valid UTF-8"):
+        load_config(path)
 
 
 def test_models_section_missing_names_the_key(tmp_path: pathlib.Path) -> None:

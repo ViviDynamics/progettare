@@ -72,8 +72,11 @@ error.
 | `base_url` | non-empty string | no | An alternate endpoint, e.g. a LiteLLM proxy. |
 
 Within `models.overrides.<stage>`, `provider`, `model`, and `base_url` are
-all optional; when present they replace the `default` value, including an
-override `base_url` where the default had none.
+all optional; when present they replace the `default` value. Setting
+`base_url` to an explicit `null` in an override is an explicit reset: the
+stage calls through the provider's own endpoint even though `default` set
+one. A null `base_url` inside `models.default` is still rejected, since a
+default rail must name where it points.
 
 ### `size`
 
@@ -93,9 +96,12 @@ Sizing thresholds the size stage applies to a blueprint.
   boolean, not an integer), strings must be non-empty strings, and each
   section must be a mapping.
 - An optional key written with an explicit null value, such as
-  `base_url: null`, is rejected like any other wrong type; omit the key
-  instead of setting it to null.
+  `base_url: null` inside `models.default`, is rejected like any other
+  wrong type; in an override, `base_url: null` is an explicit reset.
+- A mapping that repeats a key is rejected: safe YAML parsing would
+  silently keep only one of the values, and a config that loses a budget
+  to a typo must not pass.
 - Numbers below their minimum are rejected; the minimum is 1 everywhere
   except `size.documenter_min_topics`, which may be 0.
-- A file that does not exist, does not parse as YAML, or does not start with
-  a mapping is rejected, naming the file.
+- A file that does not exist, does not parse as YAML, is not valid UTF-8,
+  or does not start with a mapping is rejected, naming the file.

@@ -134,8 +134,19 @@ def _resolve_rail(default: ModelRail, override: dict[str, Any], path: str) -> Mo
     if "model" in override:
         model = _require_str(override, f"{path}.model")
     if "base_url" in override:
-        base_url = _optional_str(override, f"{path}.base_url")
+        base_url = _override_base_url(override["base_url"], f"{path}.base_url")
     return ModelRail(provider=provider, model=model, base_url=base_url)
+
+
+def _override_base_url(value: Any, key: str) -> str | None:
+    """A present null in an override is an explicit reset of the endpoint."""
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip():
+        return value
+    raise ConfigError(
+        f"{key} must be a non-empty string or null, got {type(value).__name__}"
+    )
 
 
 def config_from_mapping(data: Any) -> Config:
@@ -210,12 +221,43 @@ def config_from_mapping(data: Any) -> Config:
     )
 
 
+class _DuplicateKeyError(ValueError):
+    """A YAML mapping that repeats a key, which safe_load would fold."""
+
+
+class _NoDuplicateKeyLoader(yaml.SafeLoader):
+    """A safe loader that refuses mappings with repeated keys."""
+
+    def construct_mapping(
+        self, node: yaml.MappingNode, deep: bool = False
+    ) -> dict[Any, Any]:
+        seen: set[Any] = set()
+        for key_node, _value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            try:
+                duplicate = key in seen
+            except TypeError as error:
+                raise _DuplicateKeyError(f"unhashable mapping key {key!r}") from error
+            if duplicate:
+                raise _DuplicateKeyError(f"repeated mapping key {key!r}")
+            seen.add(key)
+        return super().construct_mapping(node, deep)
+
+
 def load_config(path: pathlib.Path) -> Config:
     """Read, parse, and validate ``progettare.yaml`` at ``path``."""
     if not path.is_file():
         raise ConfigError(f"no config file at {path}")
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise ConfigError(f"{path} could not be read: {error}") from error
+    except UnicodeError as error:
+        raise ConfigError(f"{path} is not valid UTF-8: {error}") from error
+    try:
+        data = yaml.load(text, Loader=_NoDuplicateKeyLoader)
     except yaml.YAMLError as error:
         raise ConfigError(f"{path} is not valid YAML: {error}") from error
+    except _DuplicateKeyError as error:
+        raise ConfigError(f"{path} has duplicate mapping keys: {error}") from error
     return config_from_mapping(data)
