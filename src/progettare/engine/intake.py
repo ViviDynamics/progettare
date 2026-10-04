@@ -122,14 +122,12 @@ def _is_placeholder(text: str) -> bool:
     return _normalize_criterion(text).rstrip(".!").lower() in _PLACEHOLDERS
 
 
-def parse_acceptance_criteria(body: str) -> tuple[str, ...]:
-    """The acceptance section as a stable list, in body order.
+def _parse_section(body: str) -> tuple[tuple[int, str], ...]:
+    """The section's items as (body position, text) pairs, deduplicated.
 
-    Deterministic by construction: the first acceptance-style marker line
-    opens the list, the next heading or labeled section closes it, and list
-    items are extracted with their original order. Exact duplicates are
-    dropped after normalization; two identical bullets carry no second
-    requirement, and the survey should not pay for one twice.
+    A position is the item's number among everything the section lists,
+    duplicates and blanks included, so a question saying "criterion 3"
+    points at the third bullet the reader counts in the issue body.
     """
     lines = body.splitlines()
     start = next(
@@ -160,14 +158,26 @@ def parse_acceptance_criteria(body: str) -> tuple[str, ...]:
     if current is not None:
         items.append(current)
     seen: set[str] = set()
-    stable: list[str] = []
-    for item in items:
+    stable: list[tuple[int, str]] = []
+    for index, item in enumerate(items, start=1):
         normalized = _normalize_criterion(item)
         if not normalized or normalized in seen:
             continue
         seen.add(normalized)
-        stable.append(normalized)
+        stable.append((index, normalized))
     return tuple(stable)
+
+
+def parse_acceptance_criteria(body: str) -> tuple[str, ...]:
+    """The acceptance section as a stable list, in body order.
+
+    Deterministic by construction: the first acceptance-style marker line
+    opens the list, the next heading or labeled section closes it, and list
+    items are extracted with their original order. Exact duplicates are
+    dropped after normalization; two identical bullets carry no second
+    requirement, and the survey should not pay for one twice.
+    """
+    return tuple(text for _, text in _parse_section(body))
 
 
 def _key_of(criterion: str) -> tuple[str, str, bool] | None:
@@ -266,10 +276,10 @@ def assemble(issue: Issue, repo_path: str) -> CardContext:
     the survey must not plan around a requirement nobody wrote.
     """
     resolved = _validate_repo_path(repo_path)
-    criteria = parse_acceptance_criteria(issue.body)
+    positioned = _parse_section(issue.body)
     actionable = tuple(
         (position, criterion)
-        for position, criterion in enumerate(criteria)
+        for position, criterion in positioned
         if not _is_placeholder(criterion)
     )
     questions: list[str] = []
@@ -279,19 +289,19 @@ def assemble(issue: Issue, repo_path: str) -> CardContext:
             "no acceptance section, or none with actionable items."
         )
     else:
-        for position, criterion in enumerate(criteria):
+        for position, criterion in positioned:
             if not _is_placeholder(criterion):
                 continue
             questions.append(
-                f"Acceptance criterion {position + 1} is a placeholder "
+                f"Acceptance criterion {position} is a placeholder "
                 f"({criterion!r}); what is the requirement it names?"
             )
     for conflict in find_conflicts(actionable):
         questions.append(
-            f"Acceptance criteria {conflict.first + 1} and "
-            f"{conflict.second + 1} contradict each other:\n"
-            f"  ({conflict.first + 1}) {conflict.first_text}\n"
-            f"  ({conflict.second + 1}) {conflict.second_text}\n"
+            f"Acceptance criteria {conflict.first} and "
+            f"{conflict.second} contradict each other:\n"
+            f"  ({conflict.first}) {conflict.first_text}\n"
+            f"  ({conflict.second}) {conflict.second_text}\n"
             "Which one governs?"
         )
     status = "blocked" if questions else "ok"

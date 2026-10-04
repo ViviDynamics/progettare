@@ -81,6 +81,15 @@ def test_a_placeholder_among_actionable_criteria_blocks() -> None:
     assert "TBD" in context.blocked_questions[0]
 
 
+def test_a_duplicate_does_not_shift_reported_positions() -> None:
+    body = "Acceptance:\n- one\n- one\n- TBD"
+    context = assemble(make_issue(body), "/tmp")
+    assert context.status == "blocked"
+    assert context.acceptance_criteria == ("one",)
+    assert len(context.blocked_questions) == 1
+    assert "criterion 3 is a placeholder" in context.blocked_questions[0]
+
+
 def test_a_conflict_reports_the_body_positions() -> None:
     body = "\n".join(
         [
@@ -108,6 +117,22 @@ def test_a_conflict_names_both_criteria() -> None:
     question = context.blocked_questions[0]
     assert "criteria 1 and 2" in question
     assert "must write artifacts" in question
+
+
+def test_a_duplicate_before_a_conflict_does_not_shift_positions() -> None:
+    body = "\n".join(
+        [
+            "Acceptance:",
+            "- The run must write artifacts",
+            "- The run must write artifacts",
+            "- The run must not write artifacts",
+        ]
+    )
+    context = assemble(make_issue(body), "/tmp")
+    assert context.status == "blocked"
+    question = context.blocked_questions[0]
+    assert "criteria 1 and 3" in question
+    assert "(3) The run must not write artifacts" in question
 
 
 def test_find_conflicts_stays_narrow() -> None:
