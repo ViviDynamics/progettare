@@ -9,6 +9,7 @@ from progettare.github import (
     Issue,
     IssueClosedError,
     IssueFetchError,
+    ensure_issue_open,
     load_issue,
 )
 from progettare.issue_ref import parse_issue_ref
@@ -106,3 +107,22 @@ def test_the_gh_timeout_is_bounded(
     install_gh(monkeypatch, tmp_path, "#!/bin/sh\nsleep 5\n")
     with pytest.raises(IssueFetchError, match="timed out"):
         load_issue(REF)
+
+
+def test_the_state_recheck_passes_an_open_issue(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = tmp_path / "issue.json"
+    payload.write_text(canned_issue(1))
+    install_gh(monkeypatch, tmp_path, gh_cat(str(payload)))
+    ensure_issue_open(REF)
+
+
+def test_the_state_recheck_aborts_a_closed_issue(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = tmp_path / "issue.json"
+    payload.write_text(canned_issue(1, "CLOSED"))
+    install_gh(monkeypatch, tmp_path, gh_cat(str(payload)))
+    with pytest.raises(IssueClosedError, match="CLOSED"):
+        ensure_issue_open(REF)

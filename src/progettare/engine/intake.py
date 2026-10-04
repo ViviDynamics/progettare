@@ -50,9 +50,10 @@ _MARKER_RE = re.compile(
 )
 
 # A line that closes the section: a markdown heading, or a "Label:" line of
-# the shape the family writes ("Done When:", "Implementation Notes:").
+# the shape the family writes ("Done When:", "Implementation Notes:"),
+# including the bold-wrapped spelling some bodies use.
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+")
-_LABEL_RE = re.compile(r"^\s*[A-Z][A-Za-z0-9 ' /_-]{2,40}:$")
+_LABEL_RE = re.compile(r"^\s*(?:\*\*)?[A-Z][A-Za-z0-9 ' /_-]{2,40}:\*{0,2}\s*$")
 
 _LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)")
 _CHECKBOX_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\]\s*")
@@ -184,19 +185,27 @@ def _key_of(criterion: str) -> tuple[str, str, bool] | None:
     return (subject, predicate, match.group("neg") is not None)
 
 
-def find_conflicts(criteria: tuple[str, ...]) -> tuple[Conflict, ...]:
+def find_conflicts(
+    positioned: tuple[tuple[int, str], ...],
+) -> tuple[Conflict, ...]:
     """Criteria that assert the same requirement both positively and negatively.
 
-    Deliberately narrow: a contradiction is reported only when subject and
-    predicate are identical under normalization and the negation flips.
-    Near-misses stay unanswered here; inventing a semantic-conflict oracle
-    would spend a model call on intake's job.
+    Takes criteria paired with their positions in the body, and reports
+    conflicts at those positions, so a question can quote the criteria as
+    the issue numbered them. Deliberately narrow: a contradiction is
+    reported only when subject and predicate are identical under
+    normalization and the negation flips. Near-misses stay unanswered
+    here; inventing a semantic-conflict oracle would spend a model call on
+    intake's job.
     """
-    keys = [(index, _key_of(criterion)) for index, criterion in enumerate(criteria)]
+    keys = [(position, _key_of(criterion)) for position, criterion in positioned]
     conflicts: list[Conflict] = []
     for left_position in range(len(keys)):
         for right_position in range(left_position + 1, len(keys)):
-            left_key, right_key = keys[left_position][1], keys[right_position][1]
+            left_key, right_key = (
+                keys[left_position][1],
+                keys[right_position][1],
+            )
             if left_key is None or right_key is None:
                 continue
             if (
@@ -208,8 +217,8 @@ def find_conflicts(criteria: tuple[str, ...]) -> tuple[Conflict, ...]:
                     Conflict(
                         first=keys[left_position][0],
                         second=keys[right_position][0],
-                        first_text=criteria[keys[left_position][0]],
-                        second_text=criteria[keys[right_position][0]],
+                        first_text=positioned[left_position][1],
+                        second_text=positioned[right_position][1],
                     )
                 )
     return tuple(conflicts)
@@ -252,17 +261,31 @@ def assemble(issue: Issue, repo_path: str) -> CardContext:
     """The card context, or `blocked` with the questions that unblock it.
 
     Blocked is an outcome, not an error: no model call is spent, and the
-    run directory records why the run stopped here.
+    run directory records why the run stopped here. A placeholder among
+    otherwise actionable criteria blocks just as an empty section does:
+    the survey must not plan around a requirement nobody wrote.
     """
     resolved = _validate_repo_path(repo_path)
     criteria = parse_acceptance_criteria(issue.body)
-    actionable = tuple(c for c in criteria if not _is_placeholder(c))
+    actionable = tuple(
+        (position, criterion)
+        for position, criterion in enumerate(criteria)
+        if not _is_placeholder(criterion)
+    )
     questions: list[str] = []
     if not actionable:
         questions.append(
             "What are the acceptance criteria for this issue? The body has "
             "no acceptance section, or none with actionable items."
         )
+    else:
+        for position, criterion in enumerate(criteria):
+            if not _is_placeholder(criterion):
+                continue
+            questions.append(
+                f"Acceptance criterion {position + 1} is a placeholder "
+                f"({criterion!r}); what is the requirement it names?"
+            )
     for conflict in find_conflicts(actionable):
         questions.append(
             f"Acceptance criteria {conflict.first + 1} and "
@@ -275,7 +298,7 @@ def assemble(issue: Issue, repo_path: str) -> CardContext:
     return CardContext(
         issue=issue,
         repo_path=str(resolved),
-        acceptance_criteria=actionable,
+        acceptance_criteria=tuple(c for _, c in actionable),
         clarifications=pair_clarifications(issue.comments),
         status=status,
         blocked_questions=tuple(questions),

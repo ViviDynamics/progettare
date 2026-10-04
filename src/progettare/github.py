@@ -133,3 +133,13 @@ def load_issue(ref: IssueRef, gh_path: str = "gh") -> Issue:
             "aborts, discards state, and posts nothing"
         )
     return issue
+
+
+def ensure_issue_open(ref: IssueRef, gh_path: str = "gh") -> None:
+    """Reload the issue's state, and abort when it closed mid-run.
+
+    The engine calls this before each stage publishes, so a run whose
+    issue closed under it aborts, discards state, and posts nothing,
+    exactly as the spec's failure paths require.
+    """
+    load_issue(ref, gh_path)

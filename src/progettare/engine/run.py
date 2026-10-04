@@ -39,6 +39,11 @@ def create_run_dir(base: Path, ref: IssueRef, repo_path: Path) -> Path:
     A run directory inside the checkout it surveys would contradict the
     harness's read-only promise the moment the first artifact landed, so
     that placement fails here rather than later.
+
+    The name has one-second resolution, so two runs starting in the same
+    second do not share a directory: creation is exclusive, and a taken
+    name retries with a numeric suffix rather than reusing another run's
+    artifacts.
     """
     base_resolved = base.expanduser().resolve()
     repo_resolved = repo_path.expanduser().resolve()
@@ -47,9 +52,21 @@ def create_run_dir(base: Path, ref: IssueRef, repo_path: Path) -> Path:
             f"run directory base {base_resolved} is inside the surveyed "
             f"repository {repo_resolved}; progettare writes nothing there"
         )
-    run_dir = base_resolved / run_dir_name(ref, _utc_now())
-    run_dir.mkdir(parents=True, exist_ok=True)
-    return run_dir
+    stem = run_dir_name(ref, _utc_now())
+    run_dir = base_resolved / stem
+    attempt = 1
+    while True:
+        try:
+            run_dir.mkdir(parents=True, exist_ok=False)
+            return run_dir
+        except FileExistsError:
+            attempt += 1
+            if attempt > 99:
+                raise RunDirectoryError(
+                    f"run directory {run_dir} is taken, and the retry "
+                    "suffix budget is spent"
+                ) from None
+            run_dir = base_resolved / f"{stem}-{attempt}"
 
 
 def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:

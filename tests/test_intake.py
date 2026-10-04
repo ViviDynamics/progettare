@@ -71,6 +71,31 @@ def test_placeholder_criteria_read_as_missing() -> None:
     assert "acceptance criteria" in context.blocked_questions[0]
 
 
+def test_a_placeholder_among_actionable_criteria_blocks() -> None:
+    body = "Acceptance:\n- Implement X\n- TBD"
+    context = assemble(make_issue(body), "/tmp")
+    assert context.status == "blocked"
+    assert context.acceptance_criteria == ("Implement X",)
+    assert len(context.blocked_questions) == 1
+    assert "criterion 2 is a placeholder" in context.blocked_questions[0]
+    assert "TBD" in context.blocked_questions[0]
+
+
+def test_a_conflict_reports_the_body_positions() -> None:
+    body = "\n".join(
+        [
+            "Acceptance:",
+            "- The run must write artifacts",
+            "- TBD",
+            "- The run must not write artifacts",
+        ]
+    )
+    context = assemble(make_issue(body), "/tmp")
+    assert context.status == "blocked"
+    assert len(context.blocked_questions) == 2
+    assert "criteria 1 and 3" in context.blocked_questions[1]
+
+
 def test_a_conflict_names_both_criteria() -> None:
     body = (
         "Acceptance:\n"
@@ -94,10 +119,24 @@ def test_find_conflicts_stays_narrow() -> None:
         "The run is bounded",
         "The run is not bounded",
     )
-    conflicts = find_conflicts(criteria)
+    conflicts = find_conflicts(tuple(enumerate(criteria)))
     assert len(conflicts) == 1
     assert conflicts[0].first == 4
     assert conflicts[0].second == 5
+
+
+def test_a_bold_label_terminates_the_section() -> None:
+    body = "\n".join(
+        [
+            "Acceptance:",
+            "- ships intake.json",
+            "",
+            "**Implementation Notes:**",
+            "- use a temporary file",
+        ]
+    )
+    criteria = parse_acceptance_criteria(body)
+    assert criteria == ("ships intake.json",)
 
 
 def test_clarifications_pair_questions_with_answers() -> None:

@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from progettare.contract import ARTIFACT_VERSION
 from progettare.engine.intake import assemble
 from progettare.engine.run import RunDirectoryError, create_run_dir, write_intake
@@ -33,6 +35,22 @@ def test_a_run_dir_inside_the_surveyed_repo_is_refused(tmp_path: Path) -> None:
         assert "writes nothing there" in str(exc)
     else:
         raise AssertionError("a run dir inside the repo must be refused")
+
+
+def test_two_runs_in_the_same_second_do_not_share_a_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import progettare.engine.run as run_module
+
+    monkeypatch.setattr(run_module, "_utc_now", lambda: "20261004T190000Z")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    first = create_run_dir(tmp_path / "runs", REF, repo)
+    second = create_run_dir(tmp_path / "runs", REF, repo)
+    assert first != second
+    assert first.name == f"20261004T190000Z-{REF.slug()}"
+    assert second.name == f"20261004T190000Z-{REF.slug()}-2"
+    assert (second / "intake.json").exists() is False
 
 
 def test_intake_json_is_version_stamped(tmp_path: Path) -> None:
