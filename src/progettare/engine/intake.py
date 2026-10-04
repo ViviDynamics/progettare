@@ -127,7 +127,8 @@ def _parse_section(body: str) -> tuple[tuple[int, str], ...]:
 
     A position is the item's number among everything the section lists,
     duplicates and blanks included, so a question saying "criterion 3"
-    points at the third bullet the reader counts in the issue body.
+    points at the third bullet the reader counts in the issue body. A
+    blank item is kept: it names nothing, and that is a placeholder.
     """
     lines = body.splitlines()
     start = next(
@@ -161,7 +162,7 @@ def _parse_section(body: str) -> tuple[tuple[int, str], ...]:
     stable: list[tuple[int, str]] = []
     for index, item in enumerate(items, start=1):
         normalized = _normalize_criterion(item)
-        if not normalized or normalized in seen:
+        if normalized in seen:
             continue
         seen.add(normalized)
         stable.append((index, normalized))
@@ -175,13 +176,14 @@ def parse_acceptance_criteria(body: str) -> tuple[str, ...]:
     opens the list, the next heading or labeled section closes it, and list
     items are extracted with their original order. Exact duplicates are
     dropped after normalization; two identical bullets carry no second
-    requirement, and the survey should not pay for one twice.
+    requirement, and the survey should not pay for one twice. Blank bullets
+    are dropped too: they are data for the blocked report, not requirements.
     """
-    return tuple(text for _, text in _parse_section(body))
+    return tuple(text for _, text in _parse_section(body) if text)
 
 
-def _key_of(criterion: str) -> tuple[str, str, bool] | None:
-    """The (subject, predicate, negated) triple behind a modal claim."""
+def _key_of(criterion: str) -> tuple[str, str, str, bool] | None:
+    """The (subject, modal, predicate, negated) quadruple behind a claim."""
     normalized = _normalize_criterion(criterion).rstrip(".!").lower()
     for contraction, expansion in _CONTRACTIONS.items():
         normalized = normalized.replace(contraction, expansion)
@@ -192,7 +194,7 @@ def _key_of(criterion: str) -> tuple[str, str, bool] | None:
     predicate = re.sub(r"\s+", " ", match.group("predicate").strip())
     if not subject or not predicate:
         return None
-    return (subject, predicate, match.group("neg") is not None)
+    return (subject, match.group("modal"), predicate, match.group("neg") is not None)
 
 
 def find_conflicts(
@@ -203,9 +205,10 @@ def find_conflicts(
     Takes criteria paired with their positions in the body, and reports
     conflicts at those positions, so a question can quote the criteria as
     the issue numbered them. Deliberately narrow: a contradiction is
-    reported only when subject and predicate are identical under
-    normalization and the negation flips. Near-misses stay unanswered
-    here; inventing a semantic-conflict oracle would spend a model call on
+    reported only when subject, modal, and predicate are identical under
+    normalization and the negation flips, since capability and policy can
+    coexist where the modals differ. Near-misses stay unanswered here;
+    inventing a semantic-conflict oracle would spend a model call on
     intake's job.
     """
     keys = [(position, _key_of(criterion)) for position, criterion in positioned]
@@ -221,7 +224,8 @@ def find_conflicts(
             if (
                 left_key[0] == right_key[0]
                 and left_key[1] == right_key[1]
-                and left_key[2] != right_key[2]
+                and left_key[2] == right_key[2]
+                and left_key[3] != right_key[3]
             ):
                 conflicts.append(
                     Conflict(

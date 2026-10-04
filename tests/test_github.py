@@ -98,6 +98,28 @@ def test_unreadable_state_is_refused(
         load_issue(REF)
 
 
+def test_a_null_comment_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = tmp_path / "issue.json"
+    payload.write_text(json.dumps({"state": "OPEN", "comments": [None]}))
+    install_gh(monkeypatch, tmp_path, gh_cat(str(payload)))
+    with pytest.raises(IssueFetchError, match="unreadable"):
+        load_issue(REF)
+
+
+def test_a_non_dict_comment_author_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = tmp_path / "issue.json"
+    payload.write_text(
+        json.dumps({"state": "OPEN", "comments": [{"author": "jason", "body": "text"}]})
+    )
+    install_gh(monkeypatch, tmp_path, gh_cat(str(payload)))
+    with pytest.raises(IssueFetchError, match="unreadable"):
+        load_issue(REF)
+
+
 def test_the_gh_timeout_is_bounded(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

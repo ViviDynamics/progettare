@@ -135,6 +135,35 @@ def test_a_duplicate_before_a_conflict_does_not_shift_positions() -> None:
     assert "(3) The run must not write artifacts" in question
 
 
+def test_a_blank_bullet_blocks_as_a_placeholder() -> None:
+    body = "Acceptance:\n- Implement X\n- "
+    context = assemble(make_issue(body), "/tmp")
+    assert context.status == "blocked"
+    assert context.acceptance_criteria == ("Implement X",)
+    assert len(context.blocked_questions) == 1
+    assert "criterion 2 is a placeholder" in context.blocked_questions[0]
+
+
+def test_an_all_blank_section_asks_the_general_question() -> None:
+    context = assemble(make_issue("Acceptance:\n- \n- "), "/tmp")
+    assert context.status == "blocked"
+    assert len(context.blocked_questions) == 1
+    assert "acceptance criteria" in context.blocked_questions[0]
+
+
+def test_different_modals_do_not_conflict() -> None:
+    body = "\n".join(
+        [
+            "Acceptance:",
+            "- The run can write artifacts",
+            "- The run should not write artifacts",
+        ]
+    )
+    context = assemble(make_issue(body), "/tmp")
+    assert context.status == "ok"
+    assert context.blocked_questions == ()
+
+
 def test_find_conflicts_stays_narrow() -> None:
     criteria = (
         "The loop must stop after one turn",

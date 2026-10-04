@@ -53,8 +53,12 @@ class Issue:
         return self.state == "OPEN"
 
 
-def _parse_comment(raw: dict[str, Any]) -> IssueComment:
+def _parse_comment(raw: Any) -> IssueComment:
+    if not isinstance(raw, dict):
+        raise IssueFetchError("gh returned comments in an unreadable shape")
     author = raw.get("author") or {}
+    if not isinstance(author, dict):
+        raise IssueFetchError("gh returned a comment author in an unreadable shape")
     return IssueComment(
         author=str(author.get("login") or ""),
         body=str(raw.get("body") or ""),
