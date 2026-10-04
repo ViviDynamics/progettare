@@ -150,6 +150,28 @@ def test_the_state_recheck_passes_an_open_issue(
     ensure_issue_open(REF)
 
 
+def test_unicode_content_decodes_as_utf8(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = tmp_path / "issue.json"
+    body = "Acceptance:\n- naïve: write artifacts…"
+    issue_text = json.dumps(
+        {
+            "number": 1,
+            "title": "M1: intake and card context assembly",
+            "body": body,
+            "state": "OPEN",
+            "url": "https://github.com/ViviDynamics/progettare/issues/1",
+            "comments": [],
+        },
+        ensure_ascii=False,
+    )
+    payload.write_text(issue_text, encoding="utf-8")
+    install_gh(monkeypatch, tmp_path, gh_cat(str(payload)))
+    issue = load_issue(REF)
+    assert issue.body == body
+
+
 def test_the_state_recheck_aborts_a_closed_issue(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

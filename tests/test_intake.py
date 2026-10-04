@@ -159,6 +159,24 @@ def test_a_bare_checkbox_blocks_as_a_placeholder() -> None:
     assert "criterion 2 is a placeholder" in context.blocked_questions[0]
 
 
+def test_a_standalone_marker_blocks_as_a_placeholder() -> None:
+    body = "Acceptance:\n- Implement X\n-"
+    context = assemble(make_issue(body), "/tmp")
+    assert context.status == "blocked"
+    assert len(context.blocked_questions) == 1
+    assert "criterion 2 is a placeholder" in context.blocked_questions[0]
+
+
+def test_does_and_does_not_conflict() -> None:
+    body = (
+        "Acceptance:\n- The run does write artifacts\n- The run doesn't write artifacts"
+    )
+    context = assemble(make_issue(body), "/tmp")
+    assert context.status == "blocked"
+    assert len(context.blocked_questions) == 1
+    assert "criteria 1 and 2" in context.blocked_questions[0]
+
+
 def test_the_na_spelling_blocks_as_a_placeholder() -> None:
     body = "Acceptance:\n- Implement X\n- N.A."
     context = assemble(make_issue(body), "/tmp")

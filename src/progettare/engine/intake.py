@@ -55,7 +55,9 @@ _MARKER_RE = re.compile(
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+")
 _LABEL_RE = re.compile(r"^\s*(?:\*\*)?[A-Z][A-Za-z0-9 ' /_-]{2,40}:\*{0,2}\s*$")
 
-_LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]\s+(?:\[[ xX]\]\s*)?|\d+[.)]\s+)")
+_LIST_ITEM_RE = re.compile(
+    r"^\s*(?:[-*+](?:\s+(?:\[[ xX]\]\s*)?|\s*$)|\d+[.)](?:\s+|\s*$))"
+)
 _CHECKBOX_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\]\s*")
 _CONTINUATION_RE = re.compile(r"^\s+\S")
 
@@ -63,7 +65,7 @@ _CONTINUATION_RE = re.compile(r"^\s+\S")
 # decide on: the same subject and predicate asserted both positively and
 # negatively. Anything subtler is the human's call, and intake asks.
 _MODAL_RE = re.compile(
-    r"^(?P<subject>.+?)\s+(?P<modal>must|should|shall|will|can|may)\s+"
+    r"^(?P<subject>.+?)\s+(?P<modal>must|should|shall|will|can|may|does|do)\s+"
     r"(?P<neg>not\s+)?(?P<predicate>.+)$",
 )
 _COPULA_RE = re.compile(

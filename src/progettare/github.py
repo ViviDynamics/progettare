@@ -110,6 +110,7 @@ def load_issue(ref: IssueRef, gh_path: str = "gh") -> Issue:
             command,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=GH_TIMEOUT_SECONDS,
             check=False,
         )
