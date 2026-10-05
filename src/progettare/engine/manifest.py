@@ -21,7 +21,7 @@ from progettare.contract import ARTIFACT_VERSION, PROGETTARE_VERSION
 from progettare.engine.run import atomic_write_json
 from progettare.survey.nare import NareUsage
 
-RUN_MANIFEST_VERSION = 1
+RUN_MANIFEST_VERSION = 2
 
 STATUSES = ("complete", "failed", "blocked")
 
@@ -55,23 +55,31 @@ def run_manifest(
     written_at: str,
     stages: dict[str, StageLedger],
     failing_stage: str | None = None,
+    failing_reason: str | None = None,
 ) -> dict[str, Any]:
     """The versioned manifest, loud about what stopped an incomplete run.
 
     A partial run is still a run: its manifest carries every stage that
-    did work, and the stage that stopped it. A complete run names no
-    failing stage, and an incomplete run names one; anything else is a
-    contradiction a consumer would read as a bug.
+    did work, the stage that stopped it, and the reason it stopped. A
+    complete run names no failing stage and no reason; an incomplete run
+    names both, and the reason is a nonempty string, not whitespace;
+    anything else is a contradiction a consumer would read as a bug.
     """
     if status not in STATUSES:
         raise ManifestError(
             f"run status {status!r} is not one the manifest records: "
             f"{', '.join(STATUSES)}"
         )
-    if status == "complete" and failing_stage is not None:
-        raise ManifestError("a complete run names no failing stage")
-    if status != "complete" and failing_stage is None:
-        raise ManifestError(f"a {status} run names the stage that stopped it")
+    if status == "complete":
+        if failing_stage is not None:
+            raise ManifestError("a complete run names no failing stage")
+        if failing_reason is not None:
+            raise ManifestError("a complete run names no failing stage")
+    else:
+        if failing_stage is None:
+            raise ManifestError(f"a {status} run names the stage that stopped it")
+        if failing_reason is None or not failing_reason.strip():
+            raise ManifestError(f"a {status} run names the reason it stopped")
     return {
         "version": RUN_MANIFEST_VERSION,
         "artifact": "run",
@@ -81,6 +89,7 @@ def run_manifest(
         "written_at": written_at,
         "status": status,
         "failing_stage": failing_stage,
+        "failing_reason": failing_reason,
         "stages": {
             name: {
                 "sessions": list(ledger.sessions),

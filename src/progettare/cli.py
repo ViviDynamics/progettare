@@ -8,15 +8,20 @@ Exit codes distinguish the three run outcomes a caller scripts against:
 completed, so a caller never parses prose out of a partial answer.
 
 The orchestrator is pure wiring: the stages own their budgets and their
-errors, the manifest names the stage that stopped a partial run, and
-every model call goes through the nare CLI as a subprocess.
+errors, the manifest names the stage and the reason that stopped a
+partial run, and every model call goes through the nare CLI as a
+subprocess. The issue is re-checked before each publishing stage, so a
+run whose issue closes mid-flight aborts, discards its state, and posts
+nothing.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError
@@ -31,7 +36,13 @@ from progettare.config import Config, ConfigError, load_config
 from progettare.engine.intake import assemble
 from progettare.engine.manifest import StageLedger, run_manifest, write_run_manifest
 from progettare.engine.run import create_run_dir, write_intake
-from progettare.github import Issue, IssueClosedError, IssueFetchError, load_issue
+from progettare.github import (
+    Issue,
+    IssueClosedError,
+    IssueFetchError,
+    ensure_issue_open,
+    load_issue,
+)
 from progettare.issue_ref import IssueRef, IssueRefError, parse_issue_ref
 from progettare.survey.nare import NareResult, nare_runner
 from progettare.survey.questions import plan_for
@@ -85,12 +96,15 @@ def run_blueprint(
     runner: Any,
     issue: Issue,
     written_at: str,
+    refresher: Callable[[], None],
 ) -> BlueprintOutcome:
     """Drive the ceremony stage by stage, writing artifacts as they pass.
 
     The issue is loaded by the caller and handed in, so the orchestration
     stays testable offline: every stage here runs against the real code,
-    with only the nare subprocess and the GitHub call at the seams.
+    with only the nare subprocess and the GitHub call at the seams. The
+    refresher runs before each publishing stage, so an issue that closes
+    mid-run aborts the run, discards its state, and posts nothing.
     """
     run_dir = create_run_dir(runs_base, ref, Path(repo_path))
     stages: dict[str, StageLedger] = {"intake": StageLedger()}
@@ -99,25 +113,40 @@ def run_blueprint(
         context = assemble(issue, repo_path)
         write_intake(run_dir, context, written_at)
         if context.blocked_questions:
+            reason = "; ".join(context.blocked_questions)
             write_run_manifest(
                 run_dir,
-                run_manifest(config, "blocked", written_at, stages, "intake"),
+                run_manifest(config, "blocked", written_at, stages, "intake", reason),
             )
             return BlueprintOutcome(
                 status="blocked",
                 run_dir=run_dir,
                 failing_stage="intake",
-                detail="; ".join(context.blocked_questions),
+                detail=reason,
             )
         plan = plan_for(context, config)
         stage = "survey"
+        refresher()
         survey_result = run_survey_stage(
             plan, runner, config, run_dir, repo_path, written_at
         )
         stages["survey"] = StageLedger(
             sessions=survey_result.sessions, usage=survey_result.usage
         )
+        if survey_result.partial_reasons:
+            reason = "; ".join(survey_result.partial_reasons)
+            write_run_manifest(
+                run_dir,
+                run_manifest(config, "blocked", written_at, stages, "survey", reason),
+            )
+            return BlueprintOutcome(
+                status="blocked",
+                run_dir=run_dir,
+                failing_stage="survey",
+                detail=reason,
+            )
         stage = "blueprint"
+        refresher()
         blueprint_result = run_blueprint_stage(
             _read_artifact(run_dir / "intake.json"),
             _read_artifact(run_dir / "survey.json"),
@@ -131,6 +160,7 @@ def run_blueprint(
             sessions=blueprint_result.sessions, usage=blueprint_result.usage
         )
         stage = "size"
+        refresher()
         blueprint_doc = _read_artifact(run_dir / "blueprint.json")
         size_record = classify_size(
             blueprint_doc,
@@ -142,6 +172,7 @@ def run_blueprint(
         write_size(run_dir / "size.json", size_record)
         stages["size"] = StageLedger()
         stage = "briefs"
+        refresher()
         write_briefs(
             run_dir,
             slice_briefs(blueprint_doc, size_record, written_at, config.config_version),
@@ -151,11 +182,26 @@ def run_blueprint(
             run_dir, run_manifest(config, "complete", written_at, stages)
         )
         return BlueprintOutcome(status="complete", run_dir=run_dir)
+    except IssueClosedError as error:
+        shutil.rmtree(run_dir, ignore_errors=True)
+        return BlueprintOutcome(
+            status="failed",
+            run_dir=run_dir,
+            failing_stage=stage,
+            detail=str(error),
+        )
     except Exception as error:
         stages[stage] = _ledger(error)
         write_run_manifest(
             run_dir,
-            run_manifest(config, "failed", written_at, stages, failing_stage=stage),
+            run_manifest(
+                config,
+                "failed",
+                written_at,
+                stages,
+                failing_stage=stage,
+                failing_reason=str(error),
+            ),
         )
         return BlueprintOutcome(
             status="failed", run_dir=run_dir, failing_stage=stage, detail=str(error)
@@ -207,6 +253,7 @@ def main(argv: list[str] | None = None) -> int:
         NareSubprocessRunner(),
         issue,
         written_at,
+        lambda: ensure_issue_open(ref),
     )
     if outcome.status == "complete":
         print(
