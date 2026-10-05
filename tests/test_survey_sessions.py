@@ -20,9 +20,11 @@ from progettare.survey.questions import (
     formulate,
 )
 from progettare.survey.sessions import (
+    _MAX_PROMPT_BYTES,
     READ_ONLY_SYSTEM_PROMPT,
     SessionState,
     SurveySessionError,
+    bound_prompt,
     build_session_argv,
     prompt_text,
     render_tree,
@@ -223,15 +225,32 @@ def test_prompt_carries_the_question_and_file_list() -> None:
     assert prompt.endswith("Repository files:\nsrc/x.py\nsrc/y.py")
 
 
+def test_bound_prompt_caps_the_complete_prompt() -> None:
+    question = SurveyQuestion(
+        number=1,
+        text="criteria " * _MAX_PROMPT_BYTES,
+        criterion=None,
+        command_budget=2,
+    )
+    bounded = bound_prompt(question, render_tree(("src/x.py",)))
+    assert len(bounded.encode("utf-8")) <= _MAX_PROMPT_BYTES
+    assert "prompt truncated to fit the argument limit" in bounded
+
+    ordinary = bound_prompt(make_question(1), "src/x.py")
+    assert ordinary.startswith("question 1")
+    assert "truncated" not in ordinary
+
+
 def test_run_session_streams_lines_and_kills_on_refusal(
     tmp_path: pathlib.Path,
 ) -> None:
     lines = [bash_event("ls src"), bash_event("rm src/x.py"), output_event("x")]
-    spawn_calls: list[list[str]] = []
+    procs: list[FakeProcess] = []
 
     def spawn(argv: list[str]) -> FakeProcess:
-        spawn_calls.append(argv)
-        return FakeProcess(lines)
+        proc = FakeProcess(lines)
+        procs.append(proc)
+        return proc
 
     state = run_session(
         make_question(),
@@ -244,7 +263,8 @@ def test_run_session_streams_lines_and_kills_on_refusal(
     )
     assert state.exceeded
     assert state.commands == ("ls src",)
-    assert spawn_calls and "--jsonl" in spawn_calls[0]
+    assert procs[0].killed
+    assert list(procs[0].stdout) == [output_event("x")]
 
 
 def test_run_session_records_an_early_exit(
@@ -287,7 +307,11 @@ def test_run_sessions_answers_every_question_in_budget(
     def spawn(argv: list[str]) -> FakeProcess:
         spawn_calls.append(argv)
         return FakeProcess(
-            [cost_event(10), output_event(f"findings {len(spawn_calls)}")]
+            [
+                cost_event(10),
+                read_event("src/x.py"),
+                output_event(f"findings {len(spawn_calls)}"),
+            ]
         )
 
     config = make_config(tokens=300)
@@ -299,6 +323,11 @@ def test_run_sessions_answers_every_question_in_budget(
         "findings 1",
         "findings 2",
         "findings 3",
+    ]
+    assert [answer.reads for answer in outcome.answers] == [
+        ("src/x.py",),
+        ("src/x.py",),
+        ("src/x.py",),
     ]
     assert len(spawn_calls) == 3
     assert outcome.answers[0].partial_reason is None
@@ -412,11 +441,11 @@ def test_whitespace_output_is_recorded_partial(
     assert outcome.answers[0].partial_reason == reason
 
 
-def test_render_tree_drops_control_char_paths_and_bounds_length() -> None:
-    tree = render_tree(("src/x.py", "bad\nname", "src/y.py"))
+def test_render_tree_drops_unrenderable_paths_and_bounds_length() -> None:
+    tree = render_tree(("src/x.py", "bad\nname", "\udcffoo", "src/y.py"))
     assert "src/x.py" in tree
     assert "bad\nname" not in tree
-    assert "1 paths with control characters omitted" in tree
+    assert "2 unrenderable paths omitted" in tree
 
     big = tuple(f"src/file-{i:05d}.py" for i in range(10000))
     bounded = render_tree(big)

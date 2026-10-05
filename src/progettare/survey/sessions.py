@@ -142,14 +142,23 @@ def prompt_text(question: SurveyQuestion, structure_text: str) -> str:
 
 
 def render_tree(paths: tuple[str, ...], limit: int = 96_000) -> str:
-    """The prompt's file list: newline-free paths, bounded to fit argv.
+    """The prompt's file list: renderable paths, bounded to fit argv.
 
-    Git paths may contain newlines, so paths with control characters are
-    dropped rather than joined ambiguously, and the list is truncated
-    before it can outgrow the OS per-argument limit. ``limit`` is in
-    UTF-8 encoded bytes, which is what argv measures, not code points.
+    Git paths may contain newlines or be surrogateescaped non-UTF-8
+    names, so paths progettare cannot render unambiguously are dropped
+    rather than joined or crashed on, and the list is truncated before
+    it can outgrow the OS per-argument limit. ``limit`` is in UTF-8
+    encoded bytes, which is what argv measures, not code points.
     """
-    clean = [path for path in paths if path and all(ord(char) >= 32 for char in path)]
+
+    def renderable(path: str) -> bool:
+        try:
+            path.encode("utf-8")
+        except UnicodeEncodeError:
+            return False
+        return all(ord(char) >= 32 for char in path)
+
+    clean = [path for path in paths if path and renderable(path)]
     dropped = len(paths) - len(clean)
     kept: list[str] = []
     used = 0
@@ -164,12 +173,27 @@ def render_tree(paths: tuple[str, ...], limit: int = 96_000) -> str:
     text = "\n".join(kept)
     notes = []
     if dropped:
-        notes.append(f"{dropped} paths with control characters omitted")
+        notes.append(f"{dropped} unrenderable paths omitted")
     if truncated:
         notes.append(f"{truncated} more paths omitted to fit the prompt")
     if notes:
         text += "\n" + "; ".join(notes) + "."
     return text
+
+
+def bound_prompt(question: SurveyQuestion, structure_text: str) -> str:
+    """The complete prompt, bounded to the argument limit no matter what.
+
+    The tree is budgeted around the question, but an oversized question
+    text alone can still exceed the limit, so the bound is enforced on
+    the final prompt with an explicit truncation note.
+    """
+    prompt = prompt_text(question, structure_text)
+    data = prompt.encode("utf-8")
+    if len(data) <= _MAX_PROMPT_BYTES:
+        return prompt
+    head = data[: _MAX_PROMPT_BYTES - 64].decode("utf-8", errors="ignore")
+    return head + "\n\n[prompt truncated to fit the argument limit]"
 
 
 def build_session_argv(
@@ -242,7 +266,7 @@ def run_session(
     run_dir.mkdir(parents=True, exist_ok=True)
     argv = build_session_argv(
         nare,
-        prompt_text(question, structure_text),
+        bound_prompt(question, structure_text),
         rail,
         repo_path,
         run_dir / f"survey-q{question.number}.json",
@@ -379,4 +403,5 @@ def _to_answer(question_number: int, state: SessionState) -> SurveyAnswer:
         commands=state.commands,
         findings=findings,
         partial_reason=state.partial_reason,
+        reads=state.reads,
     )

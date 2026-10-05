@@ -31,6 +31,7 @@ class SurveyAnswer:
     commands: tuple[str, ...]
     findings: str
     partial_reason: str | None = None
+    reads: tuple[str, ...] = ()
 
 
 def survey_record(
@@ -60,12 +61,13 @@ def survey_record(
             )
         seen.add(answer.question)
         question = by_number[answer.question]
-        over_budget = len(answer.commands) > question.command_budget
+        tool_calls = len(answer.commands) + len(answer.reads)
+        over_budget = tool_calls > question.command_budget
         names_overrun = "command budget exceeded" in (answer.partial_reason or "")
         if over_budget and not names_overrun:
             raise SurveyRecordError(
-                f"question {answer.question} ran {len(answer.commands)} "
-                f"commands against a budget of {question.command_budget} "
+                f"question {answer.question} ran {tool_calls} tool calls "
+                f"against a budget of {question.command_budget} "
                 "without naming the overrun"
             )
         try:
@@ -80,6 +82,7 @@ def survey_record(
             {
                 "question": answer.question,
                 "commands": list(answer.commands),
+                "reads": list(answer.reads),
                 "findings": answer.findings,
                 "partial": answer.partial_reason,
             }
