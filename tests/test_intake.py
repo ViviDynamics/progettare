@@ -69,6 +69,9 @@ def test_ok_status_writes_intake_json_with_exact_shape(tmp_path: Path) -> None:
     assert result.status == "ok"
     raw = (run_dir / "intake.json").read_text(encoding="utf-8")
     assert raw.endswith("\n")
+    lines = raw.splitlines()
+    assert lines[0] == "{"
+    assert lines[1] == '  "blocked": null,'
     document = json.loads(raw)
     assert document == {
         "schema_version": 1,
