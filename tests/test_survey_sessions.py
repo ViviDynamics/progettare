@@ -403,7 +403,9 @@ def test_missing_usage_charges_the_share_and_names_questions(
     )
     assert [answer.question for answer in outcome.answers] == [1, 2, 3]
     assert outcome.partial_reason is not None
-    assert "usage missing for question(s) 1, 2, 3" in outcome.partial_reason
+    assert (
+        "usage missing or malformed for question(s) 1, 2, 3" in outcome.partial_reason
+    )
     assert "not asked" not in outcome.partial_reason
     assert "tokens against" not in outcome.partial_reason
 
@@ -421,7 +423,25 @@ def test_malformed_cost_usage_is_treated_as_missing(
         nare_path="/bin/nare",
     )
     assert outcome.partial_reason is not None
-    assert "usage missing for question(s) 1" in outcome.partial_reason
+    assert "usage missing or malformed for question(s) 1" in outcome.partial_reason
+
+
+def test_malformed_cost_after_a_valid_one_fails_closed(
+    tmp_path: pathlib.Path,
+) -> None:
+    plan = make_plan(max_questions=1)
+    outcome = run_sessions(
+        plan,
+        make_config(tokens=300),
+        tmp_path,
+        tmp_path / "run",
+        lambda argv: FakeProcess(
+            [cost_event(10), cost_event(-5), output_event("done")]
+        ),
+        nare_path="/bin/nare",
+    )
+    assert outcome.partial_reason is not None
+    assert "usage missing or malformed for question(s) 1" in outcome.partial_reason
 
 
 def test_whitespace_output_is_recorded_partial(
@@ -487,6 +507,28 @@ def test_stream_error_reaps_the_child(tmp_path: pathlib.Path) -> None:
         return proc
 
     with pytest.raises(SurveySessionError, match="non-JSON line"):
+        run_session(
+            make_question(),
+            RAIL,
+            tmp_path,
+            tmp_path / "run",
+            100,
+            structure_text="",
+            spawn=spawn,
+            nare_path="/bin/nare",
+        )
+    assert procs[0].killed
+
+
+def test_non_object_json_line_fails_the_session(tmp_path: pathlib.Path) -> None:
+    procs: list[FakeProcess] = []
+
+    def spawn(argv: list[str]) -> FakeProcess:
+        proc = FakeProcess([bash_event("ls"), "[1, 2]", output_event("x")])
+        procs.append(proc)
+        return proc
+
+    with pytest.raises(SurveySessionError, match="non-object JSON line"):
         run_session(
             make_question(),
             RAIL,

@@ -70,6 +70,7 @@ class SessionState:
     partial_reason: str | None = None
     exceeded: bool = False
     usage_reported: bool = False
+    usage_malformed: bool = False
 
     @property
     def tokens_used(self) -> int:
@@ -85,6 +86,8 @@ class SessionState:
             raise SurveySessionError(
                 f"nare emitted a non-JSON line: {line!r}: {error}"
             ) from error
+        if not isinstance(event, dict):
+            raise SurveySessionError(f"nare emitted a non-object JSON line: {line!r}")
         kind = event.get("type")
         if kind == "cost":
             detail = event.get("detail") or {}
@@ -98,8 +101,10 @@ class SessionState:
                 and raw_input >= 0
                 and raw_output >= 0
             ):
-                # A malformed usage object is treated like a missing one:
-                # it is never charged, and the stage fails closed later.
+                # A malformed usage event makes this session's totals
+                # untrustworthy: never charged, and the stage fails
+                # closed on it just like missing usage.
+                self.usage_malformed = True
                 return
             self.usage_reported = True
             self.input_tokens += raw_input
@@ -354,7 +359,7 @@ def run_sessions(
             spawn,
             nare_path,
         )
-        if state.usage_reported:
+        if state.usage_reported and not state.usage_malformed:
             stage_used += state.tokens_used
         else:
             # Missing usage is charged the question's full share so the
@@ -373,7 +378,7 @@ def run_sessions(
             )
         if missing_usage:
             stage_reason += (
-                "; usage missing for question(s) "
+                "; usage missing or malformed for question(s) "
                 f"{', '.join(str(n) for n in missing_usage)}"
             )
         if unanswered:
