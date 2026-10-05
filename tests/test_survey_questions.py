@@ -261,9 +261,7 @@ def test_followup_plan_numbers_caps_and_traces_its_questions(
         make_config(max_questions=3),
     )
     assert [q.number for q in plan.questions] == [1, 2, 3]
-    assert all(
-        q.criterion == "blueprint follow-up: risks" for q in plan.questions
-    )
+    assert all(q.criterion == "blueprint follow-up: risks" for q in plan.questions)
     assert all(q.command_budget == 8 for q in plan.questions)
     assert plan.partial_reason is not None
     assert "dropped" in plan.partial_reason

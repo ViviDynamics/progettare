@@ -337,3 +337,77 @@ def test_version_prints_the_installed_version(
     printed = capsys.readouterr().out.strip()
     assert printed
     assert printed != "0.0.0+unknown"
+
+
+FOLLOWUP_REQUEST = json.dumps(
+    {
+        "followup": {
+            "section": "risks",
+            "questions": ["What could the follow-up break?"],
+        }
+    }
+)
+
+
+def test_a_followup_request_funds_one_more_survey_round_then_publishes(
+    tmp_path: pathlib.Path,
+) -> None:
+    outcome = run(
+        tmp_path,
+        make_issue(),
+        CannedRunner(
+            [
+                canned_result(SURVEY_OUTPUT),
+                canned_result(FOLLOWUP_REQUEST),
+                canned_result(SURVEY_OUTPUT),
+                canned_result(BLUEPRINT_OUTPUT),
+            ]
+        ),
+    )
+    assert outcome.status == "complete"
+    blueprint: dict[str, Any] = json.loads(
+        (outcome.run_dir / "blueprint.json").read_text(encoding="utf-8")
+    )
+    assert blueprint["followup_round"] == 1
+    assert (outcome.run_dir / "survey2.json").is_file()
+    manifest: dict[str, Any] = json.loads(
+        (outcome.run_dir / "run.json").read_text(encoding="utf-8")
+    )
+    assert list(manifest["stages"]) == [
+        "blueprint",
+        "briefs",
+        "followup",
+        "intake",
+        "size",
+        "survey",
+    ]
+
+
+def test_a_second_followup_request_fails_the_run(
+    tmp_path: pathlib.Path,
+) -> None:
+    outcome = run(
+        tmp_path,
+        make_issue(),
+        CannedRunner(
+            [
+                canned_result(SURVEY_OUTPUT),
+                canned_result(FOLLOWUP_REQUEST),
+                canned_result(SURVEY_OUTPUT),
+                canned_result(FOLLOWUP_REQUEST),
+            ]
+        ),
+    )
+    assert outcome.status == "failed"
+    assert outcome.failing_stage == "blueprint"
+    assert not (outcome.run_dir / "blueprint.json").is_file()
+
+
+def test_a_run_without_a_followup_stamps_round_zero(
+    tmp_path: pathlib.Path,
+) -> None:
+    outcome = run(tmp_path, make_issue(), make_runner())
+    blueprint: dict[str, Any] = json.loads(
+        (outcome.run_dir / "blueprint.json").read_text(encoding="utf-8")
+    )
+    assert blueprint["followup_round"] == 0
