@@ -90,6 +90,20 @@ class ErrorRunner:
         raise NareError("nare is not installed or not on PATH")
 
 
+class FaultingRunner:
+    """The seam where one session succeeds and the next faults loudly."""
+
+    def __init__(self, *results: NareResult) -> None:
+        self.results = list(results)
+        self.calls = 0
+
+    def run(self, argv: tuple[str, ...]) -> NareResult:
+        self.calls += 1
+        if self.calls > len(self.results):
+            raise NareError("nare timed out and was killed")
+        return self.results.pop(0)
+
+
 def make_intake() -> dict[str, Any]:
     return {
         "issue": {"number": 4, "title": "blueprint stage"},
@@ -266,12 +280,6 @@ def test_missing_payload_after_reask_fails_loudly(tmp_path: Path) -> None:
     assert not (tmp_path / "blueprint.json").exists()
 
 
-def test_nare_faults_propagate(tmp_path: Path) -> None:
-    with pytest.raises(NareError):
-        run_stage(ErrorRunner(), tmp_path)
-    assert not (tmp_path / "blueprint.json").exists()
-
-
 def test_prompt_bounding_drops_findings_from_the_end(tmp_path: Path) -> None:
     survey = make_survey()
     survey["answers"] = [
@@ -366,7 +374,33 @@ def test_reask_errors_too_large_for_the_budget_fail_loudly(
         run_stage(runner, tmp_path)
     assert "blueprint stage" in str(raised.value)
     assert "mandatory content alone exceeds" in str(raised.value)
+    assert raised.value.sessions == ("blueprint-session.json",)
+    assert raised.value.usage is not None
+    assert raised.value.usage.total_tokens == 15
     assert runner.calls == 1
+    assert not (tmp_path / "blueprint.json").exists()
+
+
+def test_a_nare_fault_in_the_reask_carries_the_first_sessions_ledger(
+    tmp_path: Path,
+) -> None:
+    runner = FaultingRunner(make_result(output=INVALID_OUTPUT))
+    with pytest.raises(NareError) as raised:
+        run_stage(runner, tmp_path)
+    assert runner.calls == 2
+    assert raised.value.sessions == (
+        "blueprint-session.json",
+        "blueprint-reask-session.json",
+    )
+    assert raised.value.usage is not None
+    assert raised.value.usage.total_tokens == 15
+
+
+def test_nare_faults_propagate(tmp_path: Path) -> None:
+    with pytest.raises(NareError) as raised:
+        run_stage(ErrorRunner(), tmp_path)
+    assert raised.value.sessions == ("blueprint-session.json",)
+    assert raised.value.usage is None
     assert not (tmp_path / "blueprint.json").exists()
 
 

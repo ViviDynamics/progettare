@@ -111,6 +111,20 @@ class ErrorRunner:
         raise NareError("nare is not installed or not on PATH")
 
 
+class FaultingRunner:
+    """The seam where one session succeeds and the next faults loudly."""
+
+    def __init__(self, results: Sequence[NareResult]) -> None:
+        self.results = list(results)
+        self.argvs: list[tuple[str, ...]] = []
+
+    def run(self, argv: tuple[str, ...]) -> NareResult:
+        self.argvs.append(argv)
+        if len(self.argvs) > len(self.results):
+            raise NareError("nare timed out and was killed")
+        return self.results[len(self.argvs) - 1]
+
+
 def ask(runner: Any, tmp_path: Path) -> SessionOutcome:
     """One call to answer_one_question with the shared plan and question."""
     return answer_one_question(
@@ -500,8 +514,20 @@ def test_an_answer_beyond_the_command_budget_fails_the_stage_loudly(
 
 
 def test_a_nare_error_from_a_session_propagates(tmp_path: Path) -> None:
-    with pytest.raises(NareError, match="not on PATH"):
+    with pytest.raises(NareError, match="not on PATH") as raised:
         run_stage(ErrorRunner(), tmp_path, stage_plan((1,)))
+    assert raised.value.sessions == ("q1-session.json",)
+    assert raised.value.usage is None
+
+
+def test_a_session_fault_carries_the_completed_sessions_ledger(
+    tmp_path: Path,
+) -> None:
+    faulting = FaultingRunner([make_result(output=VALID_OUTPUT)])
+    with pytest.raises(NareError) as raised:
+        run_stage(faulting, tmp_path, stage_plan((1, 2)))
+    assert raised.value.sessions == ("q1-session.json", "q2-session.json")
+    assert raised.value.usage == USAGE
 
 
 def test_the_written_at_stamp_lands_verbatim(tmp_path: Path) -> None:

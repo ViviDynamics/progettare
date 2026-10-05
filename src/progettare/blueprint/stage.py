@@ -24,7 +24,13 @@ from progettare.blueprint.artifact import (
 )
 from progettare.config import Config
 from progettare.contract import ARTIFACT_VERSION, PROGETTARE_VERSION
-from progettare.survey.nare import NareResult, NareRunner, NareUsage, session_argv
+from progettare.survey.nare import (
+    NareError,
+    NareResult,
+    NareRunner,
+    NareUsage,
+    session_argv,
+)
 
 BLUEPRINT_SYSTEM_PROMPT = (
     "You are the blueprint author. Work only from the intake and survey "
@@ -425,6 +431,39 @@ def _launch(
     return runner.run(argv)
 
 
+def _launch_with_ledger(
+    runner: NareRunner,
+    config: Config,
+    prompt: str,
+    schema_path: Path,
+    run_dir: Path,
+    repo_path: str,
+    budget: int,
+    session_name: str,
+    sessions: tuple[str, ...],
+    usage: NareUsage | None,
+) -> NareResult:
+    """One session launch, with the ledger attached when nare itself faults.
+
+    A session that faults reports no usage, so the ledger carries what
+    the completed sessions reported, and nothing is estimated for the
+    faulted one.
+    """
+    try:
+        return _launch(
+            runner,
+            config,
+            prompt,
+            schema_path,
+            run_dir,
+            repo_path,
+            budget,
+            session_name,
+        )
+    except NareError as error:
+        raise NareError(str(error), sessions=sessions, usage=usage) from error
+
+
 def _fail_on_budget(
     result: NareResult,
     sessions: tuple[str, ...],
@@ -470,7 +509,7 @@ def run_blueprint_stage(
     schema_path = _write_schema(run_dir)
     usages: list[NareUsage] = []
     sessions: list[str] = ["blueprint-session.json"]
-    result = _launch(
+    result = _launch_with_ledger(
         runner,
         config,
         prompt,
@@ -479,6 +518,8 @@ def run_blueprint_stage(
         repo_path,
         budget,
         "blueprint-session.json",
+        tuple(sessions),
+        _summed(usages),
     )
     if result.usage is not None:
         usages.append(result.usage)
@@ -495,9 +536,15 @@ def run_blueprint_stage(
                 sessions=tuple(sessions),
                 usage=_summed(usages),
             )
-        reask_prompt = _build_prompt(intake, survey, errors)
+        reask_prompt: str
+        try:
+            reask_prompt = _build_prompt(intake, survey, errors)
+        except BlueprintStageError as error:
+            raise BlueprintStageError(
+                str(error), sessions=tuple(sessions), usage=_summed(usages)
+            ) from error
         sessions.append("blueprint-reask-session.json")
-        reask = _launch(
+        reask = _launch_with_ledger(
             runner,
             config,
             reask_prompt,
@@ -506,6 +553,8 @@ def run_blueprint_stage(
             repo_path,
             remaining,
             "blueprint-reask-session.json",
+            tuple(sessions),
+            _summed(usages),
         )
         if reask.usage is not None:
             usages.append(reask.usage)

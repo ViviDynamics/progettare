@@ -28,7 +28,22 @@ SURVEY_SESSION_TIMEOUT_SECONDS = 600
 
 
 class NareError(RuntimeError):
-    """A nare run progettare cannot use, named loudly."""
+    """A nare run progettare cannot use, named loudly.
+
+    A stage boundary may re-raise it with the stage ledger attached: the
+    sessions that launched and the usage their result lines reported.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        sessions: tuple[str, ...] = (),
+        usage: NareUsage | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.sessions = sessions
+        self.usage = usage
 
 
 @dataclass(frozen=True)

@@ -22,7 +22,7 @@ from progettare.survey.artifact import (
     survey_record,
     write_survey,
 )
-from progettare.survey.nare import NareRunner, NareUsage, session_argv
+from progettare.survey.nare import NareError, NareRunner, NareUsage, session_argv
 from progettare.survey.questions import SurveyPlan, SurveyQuestion
 
 SURVEY_SYSTEM_PROMPT = (
@@ -232,15 +232,22 @@ def run_survey_stage(
             )
             break
         sessions.append(f"q{question.number}-session.json")
-        outcome = answer_one_question(
-            plan=plan,
-            question=question,
-            runner=runner,
-            config=config,
-            run_dir=run_dir,
-            repo_path=repo_path,
-            budget=share,
-        )
+        try:
+            outcome = answer_one_question(
+                plan=plan,
+                question=question,
+                runner=runner,
+                config=config,
+                run_dir=run_dir,
+                repo_path=repo_path,
+                budget=share,
+            )
+        except NareError as error:
+            raise NareError(
+                str(error),
+                sessions=tuple(sessions),
+                usage=_aggregate_usage(usages),
+            ) from error
         if outcome.usage is not None:
             remaining -= outcome.usage.total_tokens
             usages.append(outcome.usage)
