@@ -62,6 +62,8 @@ class SessionState:
     input_tokens: int = 0
     output_tokens: int = 0
     commands: tuple[str, ...] = ()
+    reads: tuple[str, ...] = ()
+    tool_calls: int = 0
     findings: str | None = None
     partial_reason: str | None = None
     exceeded: bool = False
@@ -96,14 +98,15 @@ class SessionState:
             if tool == "bash":
                 command = str(detail.get("command", ""))
                 validate_session_command(command)
-                commands = (*self.commands, command)
-                if len(commands) > self.question.command_budget:
-                    self._exceed(
-                        f"command budget exceeded: {len(commands)} commands "
-                        f"against a budget of {self.question.command_budget}"
-                    )
-                else:
-                    self.commands = commands
+                self.commands = (*self.commands, command)
+            elif tool == "read":
+                self.reads = (*self.reads, str(detail.get("path", "")))
+            self.tool_calls += 1
+            if self.tool_calls > self.question.command_budget:
+                self._exceed(
+                    f"command budget exceeded: {self.tool_calls} tool "
+                    f"calls against a budget of {self.question.command_budget}"
+                )
         elif kind == "output":
             self.findings = event.get("text", "")
         elif kind == "error":
@@ -220,8 +223,10 @@ def run_session(
         proc.kill()
         proc.wait()
     if proc.returncode != 0 and not state.exceeded:
-        state.partial_reason = (
-            f"nare exited {proc.returncode} before answering the question"
+        state.partial_reason = f"nare exited {proc.returncode} " + (
+            "after producing an answer"
+            if state.findings is not None
+            else "before answering the question"
         )
     return state
 
@@ -276,15 +281,19 @@ def run_sessions(
         stage_used += state.tokens_used
         answers.append(_to_answer(question.number, state))
     partial_reason = plan.partial_reason
-    if unanswered:
-        partial_reason = "; ".join(
-            reason
-            for reason in (
-                partial_reason,
-                f"survey stage budget exhausted; question(s) "
-                f"{', '.join(str(n) for n in unanswered)} not asked",
+    overran = stage_used > config.budget_survey_stage_tokens
+    if overran or unanswered:
+        stage_reason = "survey stage budget exhausted"
+        if overran:
+            stage_reason += (
+                f": {stage_used} tokens against {config.budget_survey_stage_tokens}"
             )
-            if reason
+        if unanswered:
+            stage_reason += (
+                f"; question(s) {', '.join(str(n) for n in unanswered)} not asked"
+            )
+        partial_reason = "; ".join(
+            reason for reason in (partial_reason, stage_reason) if reason
         )
     return SurveyOutcome(tuple(answers), partial_reason)
 
