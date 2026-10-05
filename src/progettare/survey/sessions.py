@@ -301,13 +301,15 @@ def run_session(
             f"run directory {run_resolved} is inside the surveyed repository "
             f"{repo_resolved}; progettare writes nothing there"
         )
-    run_dir.mkdir(parents=True, exist_ok=True)
+    # Create and pass the resolved paths: mkdir does not expand ~, and
+    # nare must see the same location the boundary check approved.
+    run_resolved.mkdir(parents=True, exist_ok=True)
     argv = build_session_argv(
         nare,
         bound_prompt(question, structure_text),
         rail,
-        repo_path,
-        run_dir / f"survey-q{question.number}.json",
+        repo_resolved,
+        run_resolved / f"survey-q{question.number}.json",
         token_share,
     )
     if spawn is None:

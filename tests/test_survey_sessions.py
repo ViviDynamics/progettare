@@ -702,6 +702,35 @@ def test_non_string_output_fails_the_session(tmp_path: pathlib.Path) -> None:
     assert procs[0].killed
 
 
+def test_run_session_uses_resolved_paths_in_argv(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = make_repo(tmp_path)
+    captured: list[list[str]] = []
+    monkeypatch.chdir(tmp_path)
+
+    def spawn(argv: list[str]) -> FakeProcess:
+        captured.append(argv)
+        return FakeProcess([output_event("x")])
+
+    run_session(
+        make_question(),
+        RAIL,
+        repo,
+        pathlib.Path("runs"),
+        100,
+        structure_text="",
+        spawn=spawn,
+        nare_path="/bin/nare",
+    )
+    argv = captured[0]
+    root = argv[argv.index("--root") + 1]
+    transcript = argv[argv.index("--session") + 1]
+    assert root == str(repo.resolve())
+    assert transcript == f"{tmp_path.resolve() / 'runs'}/survey-q1.json"
+
+
 def test_non_object_json_line_fails_the_session(tmp_path: pathlib.Path) -> None:
     repo = make_repo(tmp_path)
     procs: list[FakeProcess] = []
