@@ -27,6 +27,7 @@ jobs:
       contents: write
     outputs:
       version: ${{ steps.derive.outputs.version }}
+      created: ${{ steps.derive.outputs.created }}
     steps:
       - name: Checkout the validated commit
         uses: actions/checkout@v4
@@ -43,22 +44,26 @@ jobs:
           python-version: "3.12"
 
       # Derived from existing tags rather than a committed file, as in elm and
-      # conductor: nothing on a branch can go stale or need bumping. A tag
-      # already on the commit is reused so a rerun is idempotent.
+      # conductor: nothing on a branch can go stale or need bumping. Only this
+      # scheme's unprefixed CalVer tags are reused, so a rerun is idempotent
+      # and a foreign v-prefixed tag can never collide with a derived one.
       - name: Derive CalVer version from existing tags
         id: derive
         shell: bash
         run: |
           set -euo pipefail
-          existing="$(git tag --points-at HEAD | grep -E '^v?[0-9]{4}\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | head -n 1 || true)"
+          existing="$(git tag --points-at HEAD | grep -E '^[0-9]{4}\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | head -n 1 || true)"
           if [ -n "$existing" ]; then
             echo "Reusing existing tag on HEAD: $existing"
-            version="${existing#v}"
+            version="$existing"
+            created=false
           else
             version="$(python3 .github/scripts/next_calver.py)"
             echo "Derived new version: $version"
+            created=true
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "created=$created" >> "$GITHUB_OUTPUT"
 
       # Tagged locally first: hatch-vcs reads `git describe`, so the wheel can
       # only carry the release version if the tag exists before the build.
@@ -177,10 +182,19 @@ jobs:
           # Both architectures in one manifest: the runners are amd64 and the
           # machines that pull this are arm64, and a single-arch image makes
           # every local run go through emulation.
+          #
+          # `latest` only moves when this run actually minted the release: a
+          # rerun of an older release republishes its own tag without rolling
+          # the newer image back.
+          if [ '${{ needs.release.outputs.created }}' = 'true' ]; then
+            tags=(-t "${image}:${version}" -t "${image}:latest")
+          else
+            tags=(-t "${image}:${version}")
+          fi
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
             --build-arg "WHEEL=dist/progettare-${version}-py3-none-any.whl" \
-            -t "${image}:${version}" -t "${image}:latest" \
+            "${tags[@]}" \
             --push .
 
       - name: Check the image reports the released version

@@ -17,7 +17,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
@@ -31,8 +32,14 @@ from progettare.config import Config, ConfigError, load_config
 from progettare.engine.intake import assemble
 from progettare.engine.manifest import StageLedger, run_manifest, write_run_manifest
 from progettare.engine.run import create_run_dir, write_intake
-from progettare.github import Issue, IssueClosedError, IssueFetchError, load_issue
-from progettare.issue_ref import IssueRef, IssueRefError, parse_issue_ref
+from progettare.github import (
+    Issue,
+    IssueClosedError,
+    IssueFetchError,
+    ensure_issue_open,
+    load_issue,
+)
+from progettare.issue_ref import IssueRef, IssueRefError, resolve_issue_ref
 from progettare.survey.nare import NareResult, nare_runner
 from progettare.survey.questions import plan_for
 from progettare.survey.stage import run_survey_stage
@@ -85,12 +92,15 @@ def run_blueprint(
     runner: Any,
     issue: Issue,
     written_at: str,
+    ensure_open: Callable[[IssueRef], None],
 ) -> BlueprintOutcome:
     """Drive the ceremony stage by stage, writing artifacts as they pass.
 
     The issue is loaded by the caller and handed in, so the orchestration
     stays testable offline: every stage here runs against the real code,
     with only the nare subprocess and the GitHub call at the seams.
+    ``ensure_open`` rechecks the issue at publication time, since an issue
+    that closed while the stages ran is not planned.
     """
     run_dir = create_run_dir(runs_base, ref, Path(repo_path))
     stages: dict[str, StageLedger] = {"intake": StageLedger()}
@@ -109,20 +119,43 @@ def run_blueprint(
                 failing_stage="intake",
                 detail="; ".join(context.blocked_questions),
             )
-        plan = plan_for(context, config)
         stage = "survey"
+        plan = plan_for(context, config)
+        # The run-wide cap is enforced here, at the wiring: each stage is
+        # handed its full stage budget narrowed to what the run still has,
+        # so no stage can see a budget the run cannot fund.
+        survey_usage_budget = min(
+            config.budget_survey_stage_tokens, config.budget_run_max_tokens
+        )
         survey_result = run_survey_stage(
-            plan, runner, config, run_dir, repo_path, written_at
+            plan,
+            runner,
+            replace(
+                config,
+                budget_survey_stage_tokens=survey_usage_budget,
+            ),
+            run_dir,
+            repo_path,
+            written_at,
         )
         stages["survey"] = StageLedger(
             sessions=survey_result.sessions, usage=survey_result.usage
         )
         stage = "blueprint"
+        survey_spent = (
+            survey_result.usage.total_tokens if survey_result.usage is not None else 0
+        )
         blueprint_result = run_blueprint_stage(
             _read_artifact(run_dir / "intake.json"),
             _read_artifact(run_dir / "survey.json"),
             runner,
-            config,
+            replace(
+                config,
+                budget_blueprint_stage_tokens=min(
+                    config.budget_blueprint_stage_tokens,
+                    max(0, config.budget_run_max_tokens - survey_spent),
+                ),
+            ),
             run_dir,
             repo_path,
             written_at,
@@ -147,6 +180,9 @@ def run_blueprint(
             slice_briefs(blueprint_doc, size_record, written_at, config.config_version),
         )
         stages["briefs"] = StageLedger()
+        stage = "issue"
+        ensure_open(ref)
+        stage = "complete"
         write_run_manifest(
             run_dir, run_manifest(config, "complete", written_at, stages)
         )
@@ -178,21 +214,32 @@ def main(argv: list[str] | None = None) -> int:
     blueprint = verbs.add_parser(
         "blueprint", help="plan one issue: survey, blueprint, sizing, briefs"
     )
-    blueprint.add_argument("--issue", required=True, help="issue URL or owner/repo#N")
+    blueprint.add_argument(
+        "--issue",
+        required=True,
+        help="issue URL, owner/repo#N, or bare number resolved against --repo's origin",
+    )
     blueprint.add_argument("--repo", required=True, help="path to the checkout")
     blueprint.add_argument(
         "--config", default="progettare.yaml", help="path to progettare.yaml"
     )
     blueprint.add_argument(
-        "--runs-dir", default="runs", help="where run directories are created"
+        "--runs-dir",
+        default=None,
+        help="where run directories are created; defaults to runs/ beside the checkout",
     )
     args = parser.parse_args(argv)
     try:
-        ref = parse_issue_ref(args.issue)
+        ref = resolve_issue_ref(args.issue, args.repo)
         config = load_config(Path(args.config))
     except (IssueRefError, ConfigError) as error:
         print(f"progettare failed: {error}", file=sys.stderr)
         return EXIT_FAILED
+    runs_base = (
+        Path(args.runs_dir)
+        if args.runs_dir is not None
+        else Path(args.repo).resolve().parent / "runs"
+    )
     written_at = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     try:
         issue = load_issue(ref)
@@ -203,10 +250,11 @@ def main(argv: list[str] | None = None) -> int:
         ref,
         args.repo,
         config,
-        Path(args.runs_dir),
+        runs_base,
         NareSubprocessRunner(),
         issue,
         written_at,
+        ensure_open=ensure_issue_open,
     )
     if outcome.status == "complete":
         print(
