@@ -360,7 +360,9 @@ def test_final_session_overrun_marks_the_stage_partial(
     assert "not asked" not in outcome.partial_reason
 
 
-def test_missing_usage_fails_closed(tmp_path: pathlib.Path) -> None:
+def test_missing_usage_charges_the_share_and_names_questions(
+    tmp_path: pathlib.Path,
+) -> None:
     plan = make_plan()
     outcome = run_sessions(
         plan,
@@ -370,10 +372,27 @@ def test_missing_usage_fails_closed(tmp_path: pathlib.Path) -> None:
         lambda argv: FakeProcess([output_event("done")]),
         nare_path="/bin/nare",
     )
-    assert [answer.question for answer in outcome.answers] == [1]
+    assert [answer.question for answer in outcome.answers] == [1, 2, 3]
+    assert outcome.partial_reason is not None
+    assert "usage missing for question(s) 1, 2, 3" in outcome.partial_reason
+    assert "not asked" not in outcome.partial_reason
+    assert "tokens against" not in outcome.partial_reason
+
+
+def test_malformed_cost_usage_is_treated_as_missing(
+    tmp_path: pathlib.Path,
+) -> None:
+    plan = make_plan(max_questions=1)
+    outcome = run_sessions(
+        plan,
+        make_config(tokens=300),
+        tmp_path,
+        tmp_path / "run",
+        lambda argv: FakeProcess([cost_event(-5), output_event("done")]),
+        nare_path="/bin/nare",
+    )
     assert outcome.partial_reason is not None
     assert "usage missing for question(s) 1" in outcome.partial_reason
-    assert "question(s) 2, 3 not asked" in outcome.partial_reason
 
 
 def test_whitespace_output_is_recorded_partial(
@@ -402,6 +421,14 @@ def test_render_tree_drops_control_char_paths_and_bounds_length() -> None:
     big = tuple(f"src/file-{i:05d}.py" for i in range(10000))
     bounded = render_tree(big)
     assert len(bounded) < 96_000 + 200
+    assert "more paths omitted to fit the prompt" in bounded
+
+
+def test_render_tree_bounds_utf8_bytes_not_code_points() -> None:
+    accents = "é" * 40
+    paths = tuple(f"src/{accents}.py" for _ in range(3000))
+    bounded = render_tree(paths, limit=1000)
+    assert len(bounded.encode("utf-8")) <= 1000
     assert "more paths omitted to fit the prompt" in bounded
 
 

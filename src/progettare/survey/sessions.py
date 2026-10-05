@@ -48,6 +48,8 @@ READ_ONLY_SYSTEM_PROMPT = (
 
 _READ_ONLY_TOOLS = "read"
 
+_MAX_PROMPT_BYTES = 96_000
+
 
 class SurveySessionError(ValueError):
     """A survey session progettare cannot run, named loudly."""
@@ -85,10 +87,23 @@ class SessionState:
             ) from error
         kind = event.get("type")
         if kind == "cost":
-            self.usage_reported = True
             detail = event.get("detail") or {}
-            self.input_tokens += int(detail.get("input", 0))
-            self.output_tokens += int(detail.get("output", 0))
+            raw_input = detail.get("input")
+            raw_output = detail.get("output")
+            if not (
+                isinstance(raw_input, int)
+                and isinstance(raw_output, int)
+                and not isinstance(raw_input, bool)
+                and not isinstance(raw_output, bool)
+                and raw_input >= 0
+                and raw_output >= 0
+            ):
+                # A malformed usage object is treated like a missing one:
+                # it is never charged, and the stage fails closed later.
+                return
+            self.usage_reported = True
+            self.input_tokens += raw_input
+            self.output_tokens += raw_output
             if self.tokens_used > self.token_share:
                 self._exceed(
                     f"token budget exceeded: {self.tokens_used} tokens "
@@ -131,17 +146,20 @@ def render_tree(paths: tuple[str, ...], limit: int = 96_000) -> str:
 
     Git paths may contain newlines, so paths with control characters are
     dropped rather than joined ambiguously, and the list is truncated
-    before it can outgrow the OS per-argument limit.
+    before it can outgrow the OS per-argument limit. ``limit`` is in
+    UTF-8 encoded bytes, which is what argv measures, not code points.
     """
     clean = [path for path in paths if path and all(ord(char) >= 32 for char in path)]
     dropped = len(paths) - len(clean)
     kept: list[str] = []
     used = 0
+    budget = max(0, limit - 200)
     for path in clean:
-        if used + len(path) + 1 > limit:
+        size = len(path.encode("utf-8")) + 1
+        if used + size > budget:
             break
         kept.append(path)
-        used += len(path) + 1
+        used += size
     truncated = len(clean) - len(kept)
     text = "\n".join(kept)
     notes = []
@@ -290,7 +308,6 @@ def run_sessions(
     if count == 0:
         return SurveyOutcome((), "no questions were formulated; nothing to ask")
     share = config.budget_survey_stage_tokens // count
-    structure_text = render_tree(plan.structure.tree)
     answers: list[SurveyAnswer] = []
     unanswered: list[int] = []
     missing_usage: list[int] = []
@@ -299,6 +316,10 @@ def run_sessions(
         if share <= 0 or stage_used + share > config.budget_survey_stage_tokens:
             unanswered.append(question.number)
             continue
+        prompt_base = len(prompt_text(question, "").encode("utf-8"))
+        structure_text = render_tree(
+            plan.structure.tree, max(0, _MAX_PROMPT_BYTES - prompt_base)
+        )
         state = run_session(
             question,
             rail,
@@ -312,9 +333,10 @@ def run_sessions(
         if state.usage_reported:
             stage_used += state.tokens_used
         else:
-            # Missing usage fails closed: the stage is conservatively
-            # exhausted rather than charged zero.
-            stage_used = config.budget_survey_stage_tokens + 1
+            # Missing usage is charged the question's full share so the
+            # stage's remaining arithmetic stays conservative without
+            # reporting synthetic token counts; the stage continues.
+            stage_used += share
             missing_usage.append(question.number)
         answers.append(_to_answer(question.number, state))
     partial_reason = plan.partial_reason
