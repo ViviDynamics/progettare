@@ -15,6 +15,7 @@ from progettare.survey.questions import (
     SurveyError,
     formulate,
     observe_repo,
+    plan_for_followup,
     structure_from_files,
 )
 
@@ -246,3 +247,23 @@ def test_observe_repo_refuses_a_non_git_directory(
 ) -> None:
     with pytest.raises(SurveyError, match="not a git repository"):
         observe_repo(tmp_path)
+
+
+def test_followup_plan_numbers_caps_and_traces_its_questions(
+    tmp_path: pathlib.Path,
+) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    ctx = make_ctx(repo_path=str(tmp_path))
+    plan = plan_for_followup(
+        ctx,
+        "risks",
+        ("What could fail?", "What is untested?", "More?", "Even more?"),
+        make_config(max_questions=3),
+    )
+    assert [q.number for q in plan.questions] == [1, 2, 3]
+    assert all(
+        q.criterion == "blueprint follow-up: risks" for q in plan.questions
+    )
+    assert all(q.command_budget == 8 for q in plan.questions)
+    assert plan.partial_reason is not None
+    assert "dropped" in plan.partial_reason
