@@ -1,4 +1,4 @@
-"""Tests for the survey stage's single-session layer.
+"""Tests for the survey stage: the single-session layer and the loop.
 
 Every test runs offline: the NareRunner seam is a fake that records the
 argv it was given and replays a canned NareResult, so no nare binary and

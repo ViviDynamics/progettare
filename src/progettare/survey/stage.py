@@ -175,7 +175,7 @@ def _aggregate_usage(usages: list[NareUsage]) -> NareUsage | None:
     return NareUsage(
         input_tokens=input_total,
         output_tokens=output_total,
-        total_tokens=input_total + output_total,
+        total_tokens=sum(usage.total_tokens for usage in usages),
     )
 
 
