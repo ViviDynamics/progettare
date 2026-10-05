@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import pathlib
 import subprocess
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -88,9 +89,11 @@ class CannedRunner:
     def __init__(self, results: list[NareResult]) -> None:
         self.results = list(results)
         self.calls = 0
+        self.argvs: list[tuple[str, ...]] = []
 
     def run(self, argv: tuple[str, ...]) -> NareResult:
         self.calls += 1
+        self.argvs.append(argv)
         if self.calls > len(self.results):
             raise NareError("no canned result left")
         return self.results[self.calls - 1]
@@ -337,6 +340,146 @@ def test_version_prints_the_installed_version(
     printed = capsys.readouterr().out.strip()
     assert printed
     assert printed != "0.0.0+unknown"
+
+
+def test_the_run_cap_narrows_each_stage_budget(tmp_path: pathlib.Path) -> None:
+    capped = replace(CONFIG, budget_run_max_tokens=30)
+    runner = make_runner()
+    outcome = run(tmp_path, make_issue(), runner, config=capped)
+    assert outcome.status == "complete"
+    survey_argv = runner.argvs[0]
+    assert int(survey_argv[survey_argv.index("--budget-tokens") + 1]) == 30
+    blueprint_argv = runner.argvs[1]
+    assert int(blueprint_argv[blueprint_argv.index("--budget-tokens") + 1]) == 15
+
+
+def test_a_partially_reported_survey_charges_the_run_cap(
+    tmp_path: pathlib.Path,
+) -> None:
+    capped = replace(CONFIG, budget_run_max_tokens=30)
+    runner = CannedRunner(
+        [
+            canned_result(SURVEY_OUTPUT),
+            canned_result(SURVEY_OUTPUT, usage=None),
+            canned_result(BLUEPRINT_OUTPUT),
+        ]
+    )
+    outcome = run(
+        tmp_path,
+        make_issue(body="Acceptance:\n- one\n- two"),
+        runner,
+        config=capped,
+    )
+    assert outcome.status == "complete"
+
+    def budget(argv: Sequence[str]) -> int:
+        return int(argv[argv.index("--budget-tokens") + 1])
+
+    # One of the two survey sessions reported usage (15 of its 15-token
+    # share) and the other reported none, so the survey is charged its
+    # whole narrowed budget and the blueprint stage gets nothing left.
+    assert budget(runner.argvs[0]) == 15
+    assert budget(runner.argvs[1]) == 15
+    assert budget(runner.argvs[2]) == 0
+
+
+def test_an_unreported_share_comes_off_the_survey_pool(
+    tmp_path: pathlib.Path,
+) -> None:
+    capped = replace(CONFIG, budget_run_max_tokens=30)
+    runner = CannedRunner(
+        [
+            canned_result(SURVEY_OUTPUT, usage=None),
+            canned_result(
+                SURVEY_OUTPUT,
+                usage=NareUsage(input_tokens=3, output_tokens=2, total_tokens=5),
+            ),
+            canned_result(SURVEY_OUTPUT),
+            canned_result(BLUEPRINT_OUTPUT),
+        ]
+    )
+    outcome = run(
+        tmp_path,
+        make_issue(body="Acceptance:\n- one\n- two\n- three"),
+        runner,
+        config=capped,
+    )
+    assert outcome.status == "complete"
+
+    def budget(argv: Sequence[str]) -> int:
+        return int(argv[argv.index("--budget-tokens") + 1])
+
+    # The unreported first session keeps its 10-token share off the pool, so
+    # the later sessions shrink instead of re-spending the stage budget.
+    assert budget(runner.argvs[0]) == 10
+    assert budget(runner.argvs[1]) == 10
+    assert budget(runner.argvs[2]) == 15
+
+
+def test_the_default_runs_dir_lands_beside_the_checkout(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = make_repo(tmp_path)
+    (tmp_path / "progettare.yaml").write_text(CONFIG_YAML, encoding="utf-8")
+    issue = make_issue()
+    monkeypatch.setattr("progettare.cli.load_issue", lambda ref: issue)
+    monkeypatch.setattr("progettare.cli.ensure_issue_open", lambda ref: None)
+    monkeypatch.setattr("progettare.cli.NareSubprocessRunner", lambda: make_runner())
+    argv = [
+        "blueprint",
+        "--issue",
+        "ViviDynamics/progettare#9",
+        "--repo",
+        str(repo),
+        "--config",
+        str(tmp_path / "progettare.yaml"),
+    ]
+    assert main(argv) == 0
+    printed = json.loads(capsys.readouterr().out)
+    run_dir = pathlib.Path(printed["run_dir"])
+    assert run_dir.parent == tmp_path / "runs"
+    assert (run_dir / "run.json").is_file()
+
+
+def test_a_bare_number_resolves_through_the_cli(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = make_repo(tmp_path)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/ViviDynamics/progettare.git",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "progettare.yaml").write_text(CONFIG_YAML, encoding="utf-8")
+    issue = make_issue()
+    monkeypatch.setattr("progettare.cli.load_issue", lambda ref: issue)
+    monkeypatch.setattr("progettare.cli.ensure_issue_open", lambda ref: None)
+    monkeypatch.setattr("progettare.cli.NareSubprocessRunner", lambda: make_runner())
+    argv = [
+        "blueprint",
+        "--issue",
+        "9",
+        "--repo",
+        str(repo),
+        "--config",
+        str(tmp_path / "progettare.yaml"),
+        "--runs-dir",
+        str(tmp_path / "runs"),
+    ]
+    assert main(argv) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "complete"
 
 
 FOLLOWUP_REQUEST = json.dumps(

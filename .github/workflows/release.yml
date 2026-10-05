@@ -43,17 +43,18 @@ jobs:
           python-version: "3.12"
 
       # Derived from existing tags rather than a committed file, as in elm and
-      # conductor: nothing on a branch can go stale or need bumping. A tag
-      # already on the commit is reused so a rerun is idempotent.
+      # conductor: nothing on a branch can go stale or need bumping. Only this
+      # scheme's unprefixed CalVer tags are reused, so a rerun is idempotent
+      # and a foreign v-prefixed tag can never collide with a derived one.
       - name: Derive CalVer version from existing tags
         id: derive
         shell: bash
         run: |
           set -euo pipefail
-          existing="$(git tag --points-at HEAD | grep -E '^v?[0-9]{4}\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | head -n 1 || true)"
+          existing="$(git tag --points-at HEAD | grep -E '^[0-9]{4}\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | head -n 1 || true)"
           if [ -n "$existing" ]; then
             echo "Reusing existing tag on HEAD: $existing"
-            version="${existing#v}"
+            version="$existing"
           else
             version="$(python3 .github/scripts/next_calver.py)"
             echo "Derived new version: $version"
@@ -70,6 +71,17 @@ jobs:
           git tag --force "$version"
           uv build
           ls "dist/progettare-${version}-py3-none-any.whl" "dist/progettare-${version}.tar.gz"
+
+      # The nare pin is resolved at MINT time and persisted as a release
+      # asset, so a later rerun of the image job installs the nare the
+      # release was minted against, even if nare has published since.
+      - name: Resolve the nare pin for this release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/ViviDynamics/nare/releases/latest --jq .tag_name > dist/nare.version
 
       - name: Create GitHub release and tag
         uses: actions/github-script@v7
@@ -104,14 +116,15 @@ jobs:
             // This repository's releases are immutable, so `gh release upload`
             // afterwards fails with HTTP 422 and a release ships bare.
             const { execFileSync } = require('node:child_process');
-            // Only the artifacts. `uv build` leaves a .gitignore in dist/,
-            // and 2026.9.7 shipped it as an asset called default.gitignore.
+            // Only the artifacts, plus the nare pin the image job reads
+            // back. `uv build` leaves a .gitignore in dist/, and 2026.9.7
+            // shipped it as an asset called default.gitignore.
             const files = require('node:fs')
               .readdirSync('dist')
-              .filter((name) => name.endsWith('.whl') || name.endsWith('.tar.gz'))
+              .filter((name) => name.endsWith('.whl') || name.endsWith('.tar.gz') || name === 'nare.version')
               .map((name) => `dist/${name}`);
-            if (files.length !== 2) {
-              throw new Error(`expected a wheel and an sdist in dist/, found ${files.join(', ') || 'nothing'}`);
+            if (files.length !== 3) {
+              throw new Error(`expected a wheel, an sdist, and nare.version in dist/, found ${files.join(', ') || 'nothing'}`);
             }
             execFileSync('gh', [
               'release', 'create', version,
@@ -170,17 +183,33 @@ jobs:
 
       - name: Build and push the image
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           version='${{ needs.release.outputs.version }}'
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/progettare"
-          # Both architectures in one manifest: the runners are amd64 and the
-          # machines that pull this are arm64, and a single-arch image makes
-          # every local run go through emulation.
+          # nare is pinned at mint time, persisted on the release itself as
+          # an asset, so every rebuild of this version's image installs the
+          # same nare even if nare has published since.
+          asset_url="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$version" --jq '.assets[] | select(.name == "nare.version") | .url')"
+          nare_version="$(gh api --header 'Accept: application/octet-stream' "$asset_url")"
+          echo "nare pin for $version: $nare_version"
+          # `latest` tracks the repository's newest release, resolved fresh
+          # at publication: rerunning an older release republishes its own
+          # version tag without rolling the newer image back, while a rerun
+          # that failed before publishing can still recover `latest`.
+          latest="$(gh api repos/$GITHUB_REPOSITORY/releases/latest --jq .tag_name)"
+          if [ "$latest" = "$version" ]; then
+            tags=(-t "${image}:${version}" -t "${image}:latest")
+          else
+            tags=(-t "${image}:${version}")
+          fi
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
             --build-arg "WHEEL=dist/progettare-${version}-py3-none-any.whl" \
-            -t "${image}:${version}" -t "${image}:latest" \
+            --build-arg "NARE_VERSION=${nare_version}" \
+            "${tags[@]}" \
             --push .
 
       - name: Check the image reports the released version

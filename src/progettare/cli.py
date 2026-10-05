@@ -22,7 +22,7 @@ import json
 import shutil
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
@@ -43,8 +43,8 @@ from progettare.github import (
     ensure_issue_open,
     load_issue,
 )
-from progettare.issue_ref import IssueRef, IssueRefError, parse_issue_ref
-from progettare.survey.nare import NareResult, nare_runner
+from progettare.issue_ref import IssueRef, IssueRefError, resolve_issue_ref
+from progettare.survey.nare import NareResult, NareUsage, nare_runner
 from progettare.survey.questions import plan_for, plan_for_followup
 from progettare.survey.stage import run_survey_stage
 
@@ -80,6 +80,26 @@ def _ledger(error: BaseException) -> StageLedger:
     sessions: tuple[str, ...] = getattr(error, "sessions", ())
     usage = getattr(error, "usage", None)
     return StageLedger(sessions=sessions, usage=usage)
+
+
+def _spent(
+    sessions: tuple[str, ...],
+    usage: NareUsage | None,
+    unreported: int,
+    narrowed_budget: int,
+) -> int:
+    """The worst case a stage may have consumed against the run's cap.
+
+    Usage nare does not report still costs real tokens. When every session
+    omitted usage the aggregate is None, and when only some did the
+    aggregate undercounts, so either way the stage's narrowed budget is
+    what gets charged to the run's account.
+    """
+    if not sessions:
+        return 0
+    if unreported or usage is None:
+        return narrowed_budget
+    return usage.total_tokens
 
 
 def _read_artifact(path: Path) -> dict[str, Any]:
@@ -127,8 +147,19 @@ def run_blueprint(
         plan = plan_for(context, config)
         stage = "survey"
         refresher()
+        # The run-wide cap is enforced here, at the wiring: each stage is
+        # handed its full stage budget narrowed to what the run still has,
+        # so no stage can see a budget the run cannot fund.
+        survey_budget = min(
+            config.budget_survey_stage_tokens, config.budget_run_max_tokens
+        )
         survey_result = run_survey_stage(
-            plan, runner, config, run_dir, repo_path, written_at
+            plan,
+            runner,
+            replace(config, budget_survey_stage_tokens=survey_budget),
+            run_dir,
+            repo_path,
+            written_at,
         )
         stages["survey"] = StageLedger(
             sessions=survey_result.sessions, usage=survey_result.usage
@@ -146,12 +177,22 @@ def run_blueprint(
                 detail=reason,
             )
         stage = "blueprint"
+        charged = _spent(
+            survey_result.sessions,
+            survey_result.usage,
+            survey_result.unreported_sessions,
+            survey_budget,
+        )
+        blueprint_budget = min(
+            config.budget_blueprint_stage_tokens,
+            max(0, config.budget_run_max_tokens - charged),
+        )
         refresher()
         blueprint_result = run_blueprint_stage(
             _read_artifact(run_dir / "intake.json"),
             _read_artifact(run_dir / "survey.json"),
             runner,
-            config,
+            replace(config, budget_blueprint_stage_tokens=blueprint_budget),
             run_dir,
             repo_path,
             written_at,
@@ -161,6 +202,10 @@ def run_blueprint(
         )
         if blueprint_result.followup is not None:
             stage = "followup"
+            followup_budget = min(
+                config.budget_survey_stage_tokens,
+                max(0, config.budget_run_max_tokens - charged),
+            )
             refresher()
             followup_plan = plan_for_followup(
                 context,
@@ -169,18 +214,34 @@ def run_blueprint(
                 config,
             )
             followup_result = run_survey_stage(
-                followup_plan, runner, config, run_dir, repo_path, written_at, round=2
+                followup_plan,
+                runner,
+                replace(config, budget_survey_stage_tokens=followup_budget),
+                run_dir,
+                repo_path,
+                written_at,
+                round=2,
             )
             stages["followup"] = StageLedger(
                 sessions=followup_result.sessions, usage=followup_result.usage
             )
             stage = "blueprint"
+            charged += _spent(
+                followup_result.sessions,
+                followup_result.usage,
+                followup_result.unreported_sessions,
+                followup_budget,
+            )
+            blueprint_budget = min(
+                config.budget_blueprint_stage_tokens,
+                max(0, config.budget_run_max_tokens - charged),
+            )
             refresher()
             blueprint_result = run_blueprint_stage(
                 _read_artifact(run_dir / "intake.json"),
                 _read_artifact(run_dir / "survey2.json"),
                 runner,
-                config,
+                replace(config, budget_blueprint_stage_tokens=blueprint_budget),
                 run_dir,
                 repo_path,
                 written_at,
@@ -260,7 +321,9 @@ def main(argv: list[str] | None = None) -> int:
         "--config", default="progettare.yaml", help="path to progettare.yaml"
     )
     blueprint.add_argument(
-        "--runs-dir", default="runs", help="where run directories are created"
+        "--runs-dir",
+        default=None,
+        help="where run directories are created (default: runs/, beside the checkout)",
     )
     verbs.add_parser("serve", help="serve the ceremony over MCP stdio")
     args = parser.parse_args(argv)
@@ -270,7 +333,7 @@ def main(argv: list[str] | None = None) -> int:
         serve(sys.stdin, sys.stdout)
         return EXIT_COMPLETE
     try:
-        ref = parse_issue_ref(args.issue)
+        ref = resolve_issue_ref(args.issue, args.repo)
         config = load_config(Path(args.config))
     except (IssueRefError, ConfigError) as error:
         print(f"progettare failed: {error}", file=sys.stderr)
@@ -281,11 +344,17 @@ def main(argv: list[str] | None = None) -> int:
     except (IssueFetchError, IssueClosedError) as error:
         print(f"progettare failed: {error}", file=sys.stderr)
         return EXIT_FAILED
+    # The default runs location is beside the checkout, not inside it: a
+    # run directory must never land in the tree the survey observes.
+    if args.runs_dir is None:
+        runs_base = Path(args.repo).resolve().parent / "runs"
+    else:
+        runs_base = Path(args.runs_dir)
     outcome = run_blueprint(
         ref,
         args.repo,
         config,
-        Path(args.runs_dir),
+        runs_base,
         NareSubprocessRunner(),
         issue,
         written_at,
