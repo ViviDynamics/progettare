@@ -130,6 +130,29 @@ def test_touched_files_come_from_criteria_text() -> None:
     assert "src/other.py" not in hints
 
 
+def test_suffix_matches_require_a_path_component_boundary() -> None:
+    structure = structure_from_files(
+        ("data/alpha", "data/beta", "data/gamma", "src/cache.py")
+    )
+    plan = formulate(
+        make_ctx(criteria=("Add a cache in src/cache.py.",)),
+        structure,
+        make_config(),
+    )
+    assert plan.structure.touched == ("src/cache.py",)
+    assert "src/cache.py" in plan.questions[0].text
+    assert "data/alpha" not in plan.questions[0].text
+
+
+def test_plan_structure_carries_matched_paths_as_data() -> None:
+    plan = formulate(
+        make_ctx(criteria=("Read config.py.", "Touch cli.py next.")),
+        STRUCTURE,
+        make_config(),
+    )
+    assert plan.structure.touched == ("src/progettare/cli.py",)
+
+
 def test_one_question_per_criterion_then_structural_questions() -> None:
     plan = formulate(
         make_ctx(criteria=("First.", "Second.")),

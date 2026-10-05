@@ -8,11 +8,11 @@ checked against the read-only allowlist.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from progettare.engine.run import atomic_write_json
 from progettare.survey.commands import SurveyCommandError, validate_session_commands
 from progettare.survey.questions import SurveyPlan
 
@@ -96,7 +96,9 @@ def survey_record(
 
 
 def write_survey(path: Path, record: dict[str, Any]) -> None:
-    """Write the record as stable, diffable JSON."""
-    path.write_text(
-        json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    """Write the record atomically, readable only by its owner.
+
+    Delegates to the engine's atomic writer: the rename is what survives
+    a kill, so the blueprint stage never reads a half-written artifact.
+    """
+    atomic_write_json(path, record)

@@ -71,6 +71,8 @@ _RG_EXECUTION_FLAGS = ("--pre", "--pre-glob", "--hostname-bin")
 
 _GIT_LISTING_FLAGS = ("--list", "-l", "-a", "-r")
 
+_GIT_DIFFING_SUBCOMMANDS = ("diff", "show", "log")
+
 
 def _is_flag_chars(arg: str, allowed: str) -> bool:
     return (
@@ -150,6 +152,12 @@ def _check_git(arguments: tuple[str, ...]) -> None:
                 )
         return
     for argument in rest:
+        if argument in ("-c", "--ext-diff", "--textconv"):
+            raise SurveyCommandError(
+                f"git {subcommand} {argument} enables configured helpers; "
+                "use --no-ext-diff and --no-textconv"
+            )
+    for argument in rest:
         if argument.startswith("--output") or argument == "--ext-diff":
             raise SurveyCommandError(
                 f"git {subcommand} {argument} writes or executes; "
@@ -159,6 +167,12 @@ def _check_git(arguments: tuple[str, ...]) -> None:
             raise SurveyCommandError(
                 f"git {subcommand} {argument} opens a pager program; "
                 "a survey session may only read"
+            )
+    if subcommand in _GIT_DIFFING_SUBCOMMANDS:
+        if "--no-ext-diff" not in rest or "--no-textconv" not in rest:
+            raise SurveyCommandError(
+                f"git {subcommand} runs configured diff helpers unless "
+                "disabled; require --no-ext-diff and --no-textconv"
             )
 
 

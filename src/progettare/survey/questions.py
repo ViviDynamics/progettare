@@ -143,11 +143,16 @@ def observe_repo(repo_path: Path) -> RepoStructure:
 
 
 def _touched_for(criterion: str, tree: tuple[str, ...]) -> tuple[str, ...]:
-    """Path-like tokens in the criterion that name files in the tree."""
+    """Path-like tokens in the criterion that name files in the tree.
+
+    Suffix matches must start at a path-component boundary, so prose
+    words and filename fragments never consume the hint budget.
+    """
     touched: list[str] = []
     for token in re.findall(_PATHISH, criterion):
+        token = token.rstrip(".,;:!?")
         for entry in tree:
-            if entry == token or entry.endswith(token):
+            if entry == token or entry.endswith("/" + token):
                 if entry not in touched:
                     touched.append(entry)
             if len(touched) >= _MAX_HINTS:
@@ -222,6 +227,12 @@ def formulate(ctx: CardContext, structure: RepoStructure, config: Config) -> Sur
         replace(question, number=position)
         for position, question in enumerate(draft[:cap], start=1)
     )
+    touched: list[str] = []
+    for criterion in ctx.acceptance_criteria:
+        for entry in _touched_for(criterion, structure.tree):
+            if entry not in touched:
+                touched.append(entry)
+    plan_structure = replace(structure, touched=tuple(touched))
     partial_reason = None
     if len(draft) > cap:
         partial_reason = (
@@ -231,7 +242,7 @@ def formulate(ctx: CardContext, structure: RepoStructure, config: Config) -> Sur
     return SurveyPlan(
         issue_number=ctx.issue.number,
         repo=f"{ctx.issue.owner}/{ctx.issue.repo}",
-        structure=structure,
+        structure=plan_structure,
         questions=questions,
         command_budget=budget,
         partial_reason=partial_reason,
