@@ -262,7 +262,13 @@ def main(argv: list[str] | None = None) -> int:
     blueprint.add_argument(
         "--runs-dir", default="runs", help="where run directories are created"
     )
+    verbs.add_parser("serve", help="serve the ceremony over MCP stdio")
     args = parser.parse_args(argv)
+    if args.verb == "serve":
+        from progettare.mcp import serve
+
+        serve(sys.stdin, sys.stdout)
+        return EXIT_COMPLETE
     try:
         ref = parse_issue_ref(args.issue)
         config = load_config(Path(args.config))
