@@ -14,7 +14,7 @@ import pathlib
 from dataclasses import dataclass
 from typing import Any
 
-from progettare.blueprint.size import classify_size
+from progettare.blueprint.size import SizeStageError, classify_size
 from progettare.config import Config
 
 
@@ -61,7 +61,18 @@ def _first_divergence(stored: Any, recomputed: Any, path: str = "") -> str | Non
             if found:
                 return found
         return None
-    if stored != recomputed:
+    if isinstance(stored, list) and isinstance(recomputed, list):
+        if len(stored) != len(recomputed):
+            return f"{path or 'the record'} differs"
+        for index, (one, other) in enumerate(zip(stored, recomputed, strict=False)):
+            found = _first_divergence(one, other, f"{path}[{index}]")
+            if found:
+                return found
+        return None
+    # JSON booleans compare equal to integers in Python, so a tampered
+    # field's type is checked before its value: a stored true where the
+    # run wrote 1 is a divergence at that key path, not a byte footnote.
+    if type(stored) is not type(recomputed) or stored != recomputed:
         return f"{path or 'the record'} differs"
     return None
 
@@ -80,13 +91,16 @@ def replay_run(run_dir: pathlib.Path, config: Config) -> ReplayResult:
     written_at = stored_size.get("written_at")
     if not isinstance(written_at, str) or not written_at:
         raise ReplayError("size.json has no written_at to replay with")
-    recomputed = classify_size(
-        stored_blueprint,
-        config.size_single_turn_max_milestones,
-        config.size_documenter_min_topics,
-        written_at,
-        config.config_version,
-    )
+    try:
+        recomputed = classify_size(
+            stored_blueprint,
+            config.size_single_turn_max_milestones,
+            config.size_documenter_min_topics,
+            written_at,
+            config.config_version,
+        )
+    except SizeStageError as error:
+        raise ReplayError(f"blueprint.json could not be sized: {error}") from error
     divergence = _first_divergence(stored_size, recomputed)
     if divergence is None and raw_size != _bytes(recomputed):
         divergence = "size.json content matches but its bytes differ"

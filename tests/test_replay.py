@@ -119,6 +119,31 @@ def test_matching_content_with_differing_bytes_is_a_divergence(
     assert result.first_divergence == "size.json content matches but its bytes differ"
 
 
+def test_a_bool_where_the_run_wrote_a_number_is_named_at_its_path(
+    tmp_path: pathlib.Path,
+) -> None:
+    make_run_dir(tmp_path)
+    size_path = tmp_path / "size.json"
+    record: Any = json.loads(size_path.read_text(encoding="utf-8"))
+    record["config_version"] = True
+    size_path.write_text(
+        json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    result = replay_run(tmp_path, CONFIG)
+    assert result.identical is False
+    assert result.first_divergence == "config_version differs"
+
+
+def test_a_malformed_blueprint_names_the_file(tmp_path: pathlib.Path) -> None:
+    make_run_dir(tmp_path)
+    (tmp_path / "blueprint.json").write_text(
+        json.dumps({"not_a_blueprint": True}) + "\n", encoding="utf-8"
+    )
+    with pytest.raises(ReplayError) as raised:
+        replay_run(tmp_path, CONFIG)
+    assert "blueprint.json" in str(raised.value)
+
+
 def test_missing_files_are_loud_failures(tmp_path: pathlib.Path) -> None:
     with pytest.raises(ReplayError) as raised:
         replay_run(tmp_path, CONFIG)
