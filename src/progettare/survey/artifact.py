@@ -30,12 +30,21 @@ class SurveyAnswer:
     question: int
     commands: tuple[str, ...]
     findings: str
+    partial_reason: str | None = None
 
 
 def survey_record(
-    plan: SurveyPlan, answers: tuple[SurveyAnswer, ...]
+    plan: SurveyPlan,
+    answers: tuple[SurveyAnswer, ...],
+    stage_partial_reason: str | None = None,
 ) -> dict[str, Any]:
-    """The versioned survey record, with the caps enforced on every answer."""
+    """The versioned survey record, with the caps enforced on every answer.
+
+    A stage-level partial reason, when given, supersedes the plan's own:
+    it is how budget exhaustion at session time marks the survey partial.
+    An answer that overruns its command budget must name the overrun in
+    its own partial reason; a silent overrun is refused.
+    """
     by_number = {question.number: question for question in plan.questions}
     seen: set[int] = set()
     validated: list[dict[str, Any]] = []
@@ -51,10 +60,12 @@ def survey_record(
             )
         seen.add(answer.question)
         question = by_number[answer.question]
-        if len(answer.commands) > question.command_budget:
+        over_budget = len(answer.commands) > question.command_budget
+        if over_budget and not answer.partial_reason:
             raise SurveyRecordError(
                 f"question {answer.question} ran {len(answer.commands)} "
-                f"commands against a budget of {question.command_budget}"
+                f"commands against a budget of {question.command_budget} "
+                "without naming the overrun"
             )
         try:
             validate_session_commands(answer.commands)
@@ -69,8 +80,10 @@ def survey_record(
                 "question": answer.question,
                 "commands": list(answer.commands),
                 "findings": answer.findings,
+                "partial": answer.partial_reason,
             }
         )
+    partial_reason = stage_partial_reason or plan.partial_reason
     return {
         "version": SURVEY_RECORD_VERSION,
         "issue": plan.issue_number,
@@ -91,7 +104,7 @@ def survey_record(
             for question in plan.questions
         ],
         "answers": validated,
-        "partial_reason": plan.partial_reason,
+        "partial_reason": partial_reason,
     }
 
 
