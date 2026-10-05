@@ -637,7 +637,10 @@ def run_blueprint_stage(
         )
     reasked = record is None
     if record is None:
-        spent = usages[0].total_tokens if usages else 0
+        # The first attempt's spend is only knowable when it reported
+        # usage. An unreported attempt may have consumed its whole
+        # allocation, so nothing can be proven left for a re-ask.
+        spent = result.usage.total_tokens if result.usage is not None else budget
         remaining = budget - spent
         if remaining <= 0:
             raise BlueprintStageError(
