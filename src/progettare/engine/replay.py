@@ -113,10 +113,11 @@ def _audit_briefs(
             found = f"{name} content matches but its bytes differ"
         if found is not None:
             return f"{name}: {found}"
-    for path in sorted((run_dir / "briefs").iterdir()):
-        name = path.relative_to(run_dir).as_posix()
-        if name not in expected and path.is_file():
-            return f"{name} is not part of the recomputed briefs"
+    if (run_dir / "briefs").is_dir():
+        for path in sorted((run_dir / "briefs").iterdir()):
+            name = path.relative_to(run_dir).as_posix()
+            if name not in expected and path.is_file():
+                return f"{name} is not part of the recomputed briefs"
     return None
 
 
@@ -148,7 +149,7 @@ def replay_run(run_dir: pathlib.Path, config: Config) -> ReplayResult:
     divergence = _first_divergence(stored_size, recomputed_size)
     if divergence is None and raw_size != _bytes(recomputed_size):
         divergence = "size.json content matches but its bytes differ"
-    if divergence is None and (run_dir / "briefs").is_dir():
+    if divergence is None:
         divergence = _audit_briefs(
             run_dir, stored_blueprint, recomputed_size, written_at, config, recomputed
         )

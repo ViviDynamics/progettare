@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import shutil
 from typing import Any
 
 import pytest
@@ -44,8 +45,10 @@ def make_blueprint(milestone_count: int = 3) -> dict[str, Any]:
     }
 
 
-def make_run_dir(tmp_path: pathlib.Path) -> pathlib.Path:
+def make_run_dir(tmp_path: pathlib.Path, documenter: bool = True) -> pathlib.Path:
     blueprint = make_blueprint()
+    if not documenter:
+        blueprint["documentation_topics"] = []
     (tmp_path / "blueprint.json").write_text(
         json.dumps(blueprint, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -57,6 +60,10 @@ def make_run_dir(tmp_path: pathlib.Path) -> pathlib.Path:
         CONFIG.config_version,
     )
     write_size(tmp_path / "size.json", record)
+    write_briefs(
+        tmp_path,
+        slice_briefs(blueprint, record, WRITTEN_AT, CONFIG.config_version),
+    )
     return tmp_path
 
 
@@ -146,31 +153,22 @@ def test_a_malformed_blueprint_names_the_file(tmp_path: pathlib.Path) -> None:
     assert "blueprint.json" in str(raised.value)
 
 
-def make_full_run_dir(tmp_path: pathlib.Path, documenter: bool = True) -> None:
-    """A consistent run dir: blueprint, size, and briefs all agreeing."""
-    blueprint = make_blueprint()
-    blueprint["documentation_topics"] = [f"d{n}" for n in range(2 if documenter else 0)]
-    (tmp_path / "blueprint.json").write_text(
-        json.dumps(blueprint, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    size_record = classify_size(
-        blueprint,
-        CONFIG.size_single_turn_max_milestones,
-        CONFIG.size_documenter_min_topics,
-        WRITTEN_AT,
-        CONFIG.config_version,
-    )
-    write_size(tmp_path / "size.json", size_record)
-    write_briefs(
-        tmp_path,
-        slice_briefs(blueprint, size_record, WRITTEN_AT, CONFIG.config_version),
+def test_a_deleted_briefs_directory_is_a_divergence(
+    tmp_path: pathlib.Path,
+) -> None:
+    make_run_dir(tmp_path)
+    shutil.rmtree(tmp_path / "briefs")
+    result = replay_run(tmp_path, CONFIG)
+    assert result.identical is False
+    assert result.first_divergence == (
+        "briefs/documenter.json is missing from the run directory"
     )
 
 
 def test_a_run_dir_with_briefs_replays_byte_identical(
     tmp_path: pathlib.Path,
 ) -> None:
-    make_full_run_dir(tmp_path)
+    make_run_dir(tmp_path)
     result = replay_run(tmp_path, CONFIG)
     assert result.identical is True
     assert result.first_divergence is None
@@ -183,7 +181,7 @@ def test_a_run_dir_with_briefs_replays_byte_identical(
 
 
 def test_a_tampered_brief_is_named_with_its_file(tmp_path: pathlib.Path) -> None:
-    make_full_run_dir(tmp_path)
+    make_run_dir(tmp_path)
     qa_path = tmp_path / "briefs" / "qa.json"
     record: Any = json.loads(qa_path.read_text(encoding="utf-8"))
     record["brief"]["testable_criteria"][0] = "tampered"
@@ -198,7 +196,7 @@ def test_a_tampered_brief_is_named_with_its_file(tmp_path: pathlib.Path) -> None
 
 
 def test_a_missing_expected_brief_is_a_divergence(tmp_path: pathlib.Path) -> None:
-    make_full_run_dir(tmp_path)
+    make_run_dir(tmp_path)
     (tmp_path / "briefs" / "documenter.json").unlink()
     result = replay_run(tmp_path, CONFIG)
     assert result.identical is False
@@ -208,7 +206,7 @@ def test_a_missing_expected_brief_is_a_divergence(tmp_path: pathlib.Path) -> Non
 
 
 def test_an_unexpected_brief_file_is_a_divergence(tmp_path: pathlib.Path) -> None:
-    make_full_run_dir(tmp_path, documenter=False)
+    make_run_dir(tmp_path, documenter=False)
     extra = tmp_path / "briefs" / "documenter.json"
     extra.write_text("{}", encoding="utf-8")
     result = replay_run(tmp_path, CONFIG)
