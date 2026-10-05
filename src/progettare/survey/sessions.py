@@ -149,7 +149,12 @@ class SessionState:
                     f"calls against a budget of {self.question.command_budget}"
                 )
         elif kind == "output":
-            self.findings = event.get("text", "")
+            text = event.get("text")
+            if not isinstance(text, str):
+                raise SurveySessionError(
+                    f"nare emitted an output event without text: {line!r}"
+                )
+            self.findings = text
         elif kind == "error":
             self.partial_reason = f"nare errored: {event.get('text', '')}"
             self.exceeded = True
