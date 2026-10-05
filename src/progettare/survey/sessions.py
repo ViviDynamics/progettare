@@ -137,7 +137,12 @@ class SessionState:
                 validate_session_command(command)
                 self.commands = (*self.commands, command)
             elif tool == "read":
-                self.reads = (*self.reads, str(detail.get("path", "")))
+                path = detail.get("path")
+                if not isinstance(path, str) or not path:
+                    raise SurveySessionError(
+                        f"nare emitted a read event without a path: {line!r}"
+                    )
+                self.reads = (*self.reads, path)
             else:
                 raise SurveyCommandError(
                     f"tool {tool!r} is outside the read-only allowlist"
