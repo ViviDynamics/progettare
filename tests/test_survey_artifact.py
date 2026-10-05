@@ -11,7 +11,6 @@ from progettare.config import Config, ModelRail
 from progettare.engine.intake import CardContext
 from progettare.github import Issue
 from progettare.survey.artifact import (
-    SURVEY_RECORD_VERSION,
     SurveyAnswer,
     SurveyRecordError,
     survey_record,
@@ -68,7 +67,7 @@ def test_record_is_versioned_and_structured() -> None:
     record = survey_record(
         plan, (SurveyAnswer(question=1, commands=("ls",), findings="found"),)
     )
-    assert record["version"] == SURVEY_RECORD_VERSION
+    assert record["version"] == 2
     assert record["issue"] == 7
     assert record["repo"] == "acme/widgets"
     assert record["structure"]["tree"] == ["pyproject.toml", "src/x.py"]
