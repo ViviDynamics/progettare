@@ -493,8 +493,10 @@ def test_an_answer_beyond_the_command_budget_fails_the_stage_loudly(
         {"commands": ["cat a", "cat b", "cat c"], "findings": "found"}
     )
     runner = StageRunner([make_result(output=over_budget)])
-    with pytest.raises(SurveyRecordError, match="budget of 2"):
+    with pytest.raises(SurveyRecordError, match="budget of 2") as raised:
         run_stage(runner, tmp_path, stage_plan((1,), command_budget=2))
+    assert raised.value.sessions == ("q1-session.json",)
+    assert raised.value.usage == USAGE
 
 
 def test_a_nare_error_from_a_session_propagates(tmp_path: Path) -> None:

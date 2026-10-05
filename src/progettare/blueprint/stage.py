@@ -104,7 +104,23 @@ _TASK_TEXT = (
 
 
 class BlueprintStageError(RuntimeError):
-    """The blueprint stage failed the run, naming itself and the reason."""
+    """The blueprint stage failed the run, naming itself and the reason.
+
+    The stage failed, but the sessions that launched already ran, so the
+    error carries the ledger a failed-run manifest needs: the session
+    files launched and the usage their JSONL result lines reported.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        sessions: tuple[str, ...] = (),
+        usage: NareUsage | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.sessions = sessions
+        self.usage = usage
 
 
 def _check_string_list(section: Any, name: str, errors: list[str]) -> None:
@@ -409,11 +425,21 @@ def _launch(
     return runner.run(argv)
 
 
-def _fail_on_budget(result: NareResult) -> None:
-    """Budget exhaustion fails the run instead of publishing a cut-off plan."""
+def _fail_on_budget(
+    result: NareResult,
+    sessions: tuple[str, ...],
+    usage: NareUsage | None,
+) -> None:
+    """Budget exhaustion fails the run instead of publishing a cut-off plan.
+
+    The session that exhausted its budget already ran, so the failure
+    carries the ledger the failed-run manifest needs.
+    """
     if result.stop_reason == "budget":
         raise BlueprintStageError(
-            "blueprint stage: the nare session exhausted its token budget"
+            "blueprint stage: the nare session exhausted its token budget",
+            sessions=sessions,
+            usage=usage,
         )
 
 
@@ -442,6 +468,8 @@ def run_blueprint_stage(
     budget = config.budget_blueprint_stage_tokens
     prompt = _build_prompt(intake, survey)
     schema_path = _write_schema(run_dir)
+    usages: list[NareUsage] = []
+    sessions: list[str] = ["blueprint-session.json"]
     result = _launch(
         runner,
         config,
@@ -452,10 +480,9 @@ def run_blueprint_stage(
         budget,
         "blueprint-session.json",
     )
-    usages: list[NareUsage] = []
     if result.usage is not None:
         usages.append(result.usage)
-    _fail_on_budget(result)
+    _fail_on_budget(result, tuple(sessions), _summed(usages))
     record, errors = _extract(result)
     reasked = record is None
     if record is None:
@@ -464,9 +491,12 @@ def run_blueprint_stage(
         if remaining <= 0:
             raise BlueprintStageError(
                 "blueprint stage: no budget remains for the bounded re-ask: "
-                + "; ".join(errors)
+                + "; ".join(errors),
+                sessions=tuple(sessions),
+                usage=_summed(usages),
             )
         reask_prompt = _build_prompt(intake, survey, errors)
+        sessions.append("blueprint-reask-session.json")
         reask = _launch(
             runner,
             config,
@@ -479,12 +509,14 @@ def run_blueprint_stage(
         )
         if reask.usage is not None:
             usages.append(reask.usage)
-        _fail_on_budget(reask)
+        _fail_on_budget(reask, tuple(sessions), _summed(usages))
         record, errors = _extract(reask)
         if record is None:
             raise BlueprintStageError(
                 "blueprint stage: the re-asked blueprint payload is invalid: "
-                + "; ".join(errors)
+                + "; ".join(errors),
+                sessions=tuple(sessions),
+                usage=_summed(usages),
             )
     stamped: dict[str, Any] = {
         "artifact": "blueprint",
@@ -495,9 +527,6 @@ def run_blueprint_stage(
     }
     path = run_dir / "blueprint.json"
     write_blueprint(path, stamped)
-    sessions: list[str] = ["blueprint-session.json"]
-    if reasked:
-        sessions.append("blueprint-reask-session.json")
     return BlueprintStageResult(
         path=path,
         blueprint=record,

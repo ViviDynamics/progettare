@@ -14,13 +14,31 @@ from typing import Any
 
 from progettare.engine.run import atomic_write_json
 from progettare.survey.commands import SurveyCommandError, validate_session_commands
+from progettare.survey.nare import NareUsage
 from progettare.survey.questions import SurveyPlan
 
 SURVEY_RECORD_VERSION = 1
 
 
 class SurveyRecordError(ValueError):
-    """An answer set progettare refuses to record, named loudly."""
+    """An answer set progettare refuses to record, named loudly.
+
+    The record is refused, but the sessions that produced it already
+    ran, so the error carries the stage ledger a failed-run manifest
+    needs: the session files launched and the usage their JSONL result
+    lines reported.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        sessions: tuple[str, ...] = (),
+        usage: NareUsage | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.sessions = sessions
+        self.usage = usage
 
 
 @dataclass(frozen=True)

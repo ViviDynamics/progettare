@@ -16,7 +16,12 @@ from typing import Any
 
 from progettare.config import Config
 from progettare.contract import ARTIFACT_VERSION, PROGETTARE_VERSION
-from progettare.survey.artifact import SurveyAnswer, survey_record, write_survey
+from progettare.survey.artifact import (
+    SurveyAnswer,
+    SurveyRecordError,
+    survey_record,
+    write_survey,
+)
 from progettare.survey.nare import NareRunner, NareUsage, session_argv
 from progettare.survey.questions import SurveyPlan, SurveyQuestion
 
@@ -245,7 +250,14 @@ def run_survey_stage(
         else:
             reasons.append(f"question {question.number}: {outcome.stop_reason}")
     combined = "; ".join(reasons) if reasons else None
-    record = survey_record(replace(plan, partial_reason=combined), tuple(answers))
+    try:
+        record = survey_record(replace(plan, partial_reason=combined), tuple(answers))
+    except SurveyRecordError as error:
+        raise SurveyRecordError(
+            str(error),
+            sessions=tuple(sessions),
+            usage=_aggregate_usage(usages),
+        ) from error
     stamped: dict[str, Any] = {
         "artifact": "survey",
         "artifact_version": ARTIFACT_VERSION,

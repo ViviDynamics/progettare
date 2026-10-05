@@ -200,6 +200,11 @@ def test_invalid_after_reask_fails_loudly_and_publishes_nothing(
     assert "blueprint stage" in message
     assert "invalid" in message
     assert "milestones is an empty array" in message
+    assert raised.value.sessions == (
+        "blueprint-session.json",
+        "blueprint-reask-session.json",
+    )
+    assert raised.value.usage is not None
     assert runner.calls == 2
     assert not (tmp_path / "blueprint.json").exists()
 
@@ -224,6 +229,9 @@ def test_budget_exhaustion_in_the_first_session_fails_the_run(
         run_stage(runner, tmp_path)
     assert "blueprint stage" in str(raised.value)
     assert "exhausted its token budget" in str(raised.value)
+    assert raised.value.sessions == ("blueprint-session.json",)
+    assert raised.value.usage is not None
+    assert raised.value.usage.total_tokens == 15
     assert runner.calls == 1
     assert not (tmp_path / "blueprint.json").exists()
 
@@ -237,6 +245,11 @@ def test_budget_exhaustion_in_the_reask_fails_the_run(tmp_path: Path) -> None:
         run_stage(runner, tmp_path)
     assert "blueprint stage" in str(raised.value)
     assert "exhausted its token budget" in str(raised.value)
+    assert raised.value.sessions == (
+        "blueprint-session.json",
+        "blueprint-reask-session.json",
+    )
+    assert raised.value.usage is not None
     assert runner.calls == 2
     assert not (tmp_path / "blueprint.json").exists()
 
