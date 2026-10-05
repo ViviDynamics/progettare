@@ -308,6 +308,15 @@ def test_oversized_header_truncates_but_keeps_the_task_and_errors(
     assert result.reasked is True
 
 
+def test_non_string_keys_yield_validation_errors_not_typeerrors() -> None:
+    payload = json.loads(VALID_OUTPUT)
+    payload[123] = "surprise"
+    payload["milestones"][0][456] = "surprise"
+    errors = validate_blueprint(payload)
+    assert "unknown key(s): 123" in errors[0]
+    assert any("carries unknown key(s): 456" in error for error in errors)
+
+
 def test_oversized_tree_is_marked_and_the_prompt_stays_capped(
     tmp_path: Path,
 ) -> None:

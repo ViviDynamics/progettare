@@ -123,7 +123,8 @@ def _check_milestone(item: Any, position: int, errors: list[str]) -> None:
     unknown = sorted(set(item) - {"title", "changes"}, key=str)
     if unknown:
         errors.append(
-            f"milestones[{position}] carries unknown key(s): {', '.join(unknown)}"
+            f"milestones[{position}] carries unknown key(s): "
+            + ", ".join(str(key) for key in unknown)
         )
     title = item.get("title")
     if not isinstance(title, str) or not title.strip():
@@ -154,7 +155,7 @@ def validate_blueprint(payload: object) -> tuple[str, ...]:
     errors: list[str] = []
     unknown = sorted(set(payload) - set(_BLUEPRINT_KEYS), key=str)
     if unknown:
-        errors.append(f"unknown key(s): {', '.join(unknown)}")
+        errors.append("unknown key(s): " + ", ".join(str(key) for key in unknown))
     missing = [name for name in _BLUEPRINT_KEYS if name not in payload]
     if missing:
         errors.append(f"missing key(s): {', '.join(missing)}")
