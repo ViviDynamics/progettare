@@ -67,6 +67,7 @@ class SessionState:
     findings: str | None = None
     partial_reason: str | None = None
     exceeded: bool = False
+    usage_reported: bool = False
 
     @property
     def tokens_used(self) -> int:
@@ -84,6 +85,7 @@ class SessionState:
             ) from error
         kind = event.get("type")
         if kind == "cost":
+            self.usage_reported = True
             detail = event.get("detail") or {}
             self.input_tokens += int(detail.get("input", 0))
             self.output_tokens += int(detail.get("output", 0))
@@ -122,6 +124,34 @@ def prompt_text(question: SurveyQuestion, structure_text: str) -> str:
     """The session prompt: the question plus the repository's file list."""
     files = f"\n\nRepository files:\n{structure_text}" if structure_text else ""
     return f"{question.text}{files}"
+
+
+def render_tree(paths: tuple[str, ...], limit: int = 96_000) -> str:
+    """The prompt's file list: newline-free paths, bounded to fit argv.
+
+    Git paths may contain newlines, so paths with control characters are
+    dropped rather than joined ambiguously, and the list is truncated
+    before it can outgrow the OS per-argument limit.
+    """
+    clean = [path for path in paths if path and all(ord(char) >= 32 for char in path)]
+    dropped = len(paths) - len(clean)
+    kept: list[str] = []
+    used = 0
+    for path in clean:
+        if used + len(path) + 1 > limit:
+            break
+        kept.append(path)
+        used += len(path) + 1
+    truncated = len(clean) - len(kept)
+    text = "\n".join(kept)
+    notes = []
+    if dropped:
+        notes.append(f"{dropped} paths with control characters omitted")
+    if truncated:
+        notes.append(f"{truncated} more paths omitted to fit the prompt")
+    if notes:
+        text += "\n" + "; ".join(notes) + "."
+    return text
 
 
 def build_session_argv(
@@ -260,9 +290,10 @@ def run_sessions(
     if count == 0:
         return SurveyOutcome((), "no questions were formulated; nothing to ask")
     share = config.budget_survey_stage_tokens // count
-    structure_text = "\n".join(plan.structure.tree)
+    structure_text = render_tree(plan.structure.tree)
     answers: list[SurveyAnswer] = []
     unanswered: list[int] = []
+    missing_usage: list[int] = []
     stage_used = 0
     for question in plan.questions:
         if share <= 0 or stage_used + share > config.budget_survey_stage_tokens:
@@ -278,15 +309,26 @@ def run_sessions(
             spawn,
             nare_path,
         )
-        stage_used += state.tokens_used
+        if state.usage_reported:
+            stage_used += state.tokens_used
+        else:
+            # Missing usage fails closed: the stage is conservatively
+            # exhausted rather than charged zero.
+            stage_used = config.budget_survey_stage_tokens + 1
+            missing_usage.append(question.number)
         answers.append(_to_answer(question.number, state))
     partial_reason = plan.partial_reason
     overran = stage_used > config.budget_survey_stage_tokens
-    if overran or unanswered:
+    if overran or missing_usage or unanswered:
         stage_reason = "survey stage budget exhausted"
         if overran:
             stage_reason += (
                 f": {stage_used} tokens against {config.budget_survey_stage_tokens}"
+            )
+        if missing_usage:
+            stage_reason += (
+                "; usage missing for question(s) "
+                f"{', '.join(str(n) for n in missing_usage)}"
             )
         if unanswered:
             stage_reason += (
@@ -299,15 +341,17 @@ def run_sessions(
 
 
 def _to_answer(question_number: int, state: SessionState) -> SurveyAnswer:
-    findings = state.findings
-    if findings is None:
-        # A session that never produced an output event did not answer
-        # the question; record it as partial rather than fabricating a
+    stripped = (state.findings or "").strip()
+    if not stripped:
+        # A session with no substantive output did not answer the
+        # question; record it as partial rather than fabricating a
         # complete answer.
         state.partial_reason = state.partial_reason or (
             "session ended without answering the question"
         )
         findings = state.partial_reason
+    else:
+        findings = state.findings or ""
     return SurveyAnswer(
         question=question_number,
         commands=state.commands,

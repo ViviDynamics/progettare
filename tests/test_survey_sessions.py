@@ -25,6 +25,7 @@ from progettare.survey.sessions import (
     SurveySessionError,
     build_session_argv,
     prompt_text,
+    render_tree,
     run_session,
     run_sessions,
 )
@@ -285,7 +286,9 @@ def test_run_sessions_answers_every_question_in_budget(
 
     def spawn(argv: list[str]) -> FakeProcess:
         spawn_calls.append(argv)
-        return FakeProcess([output_event(f"findings {len(spawn_calls)}")])
+        return FakeProcess(
+            [cost_event(10), output_event(f"findings {len(spawn_calls)}")]
+        )
 
     config = make_config(tokens=300)
     outcome = run_sessions(
@@ -357,6 +360,51 @@ def test_final_session_overrun_marks_the_stage_partial(
     assert "not asked" not in outcome.partial_reason
 
 
+def test_missing_usage_fails_closed(tmp_path: pathlib.Path) -> None:
+    plan = make_plan()
+    outcome = run_sessions(
+        plan,
+        make_config(tokens=300),
+        tmp_path,
+        tmp_path / "run",
+        lambda argv: FakeProcess([output_event("done")]),
+        nare_path="/bin/nare",
+    )
+    assert [answer.question for answer in outcome.answers] == [1]
+    assert outcome.partial_reason is not None
+    assert "usage missing for question(s) 1" in outcome.partial_reason
+    assert "question(s) 2, 3 not asked" in outcome.partial_reason
+
+
+def test_whitespace_output_is_recorded_partial(
+    tmp_path: pathlib.Path,
+) -> None:
+    plan = make_plan(max_questions=1)
+    outcome = run_sessions(
+        plan,
+        make_config(tokens=300),
+        tmp_path,
+        tmp_path / "run",
+        lambda argv: FakeProcess([cost_event(10), output_event("  \n")]),
+        nare_path="/bin/nare",
+    )
+    reason = "session ended without answering the question"
+    assert outcome.answers[0].findings == reason
+    assert outcome.answers[0].partial_reason == reason
+
+
+def test_render_tree_drops_control_char_paths_and_bounds_length() -> None:
+    tree = render_tree(("src/x.py", "bad\nname", "src/y.py"))
+    assert "src/x.py" in tree
+    assert "bad\nname" not in tree
+    assert "1 paths with control characters omitted" in tree
+
+    big = tuple(f"src/file-{i:05d}.py" for i in range(10000))
+    bounded = render_tree(big)
+    assert len(bounded) < 96_000 + 200
+    assert "more paths omitted to fit the prompt" in bounded
+
+
 def test_session_without_output_is_recorded_partial(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -414,7 +462,7 @@ def test_plan_partial_reason_survives_into_the_outcome(
 
 
 def spawn_passthrough(argv: list[str]) -> FakeProcess:
-    return FakeProcess([output_event("findings")])
+    return FakeProcess([cost_event(10), output_event("findings")])
 
 
 def test_record_accepts_stage_partial_reason() -> None:
