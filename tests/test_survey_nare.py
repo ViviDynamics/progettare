@@ -70,6 +70,13 @@ class MissingExecutableRunner:
         raise FileNotFoundError("No such file or directory: 'nare'")
 
 
+class HungRunner:
+    """A subprocess seam where the nare child hangs until it is killed."""
+
+    def run(self, argv: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(cmd=["nare", "run", "question"], timeout=600)
+
+
 def test_session_argv_carries_every_family_flag_in_order() -> None:
     argv = session_argv(
         prompt="Which files implement the survey stage?",
@@ -208,3 +215,8 @@ def test_usage_absent_in_the_result_line_decodes_to_none() -> None:
 def test_a_missing_nare_executable_raises_nare_error() -> None:
     with pytest.raises(NareError, match="not on PATH"):
         nare_runner(("nare", "run", "question"), run=MissingExecutableRunner())
+
+
+def test_a_hung_nare_session_times_out_as_a_typed_nare_error() -> None:
+    with pytest.raises(NareError, match=r"timed out after 600"):
+        nare_runner(("nare", "run", "question"), run=HungRunner())

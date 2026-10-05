@@ -21,6 +21,11 @@ from typing import Any, Protocol
 
 from progettare.config import ModelRail
 
+# A survey session is a model loop bounded by its own --budget-tokens, so a
+# legitimate run finishes well inside ten minutes; a child that outlives this
+# is hung, and a hung child fails loudly here instead of stalling the stage.
+SURVEY_SESSION_TIMEOUT_SECONDS = 600
+
 
 class NareError(RuntimeError):
     """A nare run progettare cannot use, named loudly."""
@@ -37,7 +42,7 @@ class NareUsage:
 
 @dataclass(frozen=True)
 class NareResult:
-    """The decoded `result` line, plus whether the run exited cleanly.
+    """The decoded `result` line from nare's stdout.
 
     `output` carries the schema-validated answer object serialized as
     text when nare reports one, else None.
@@ -114,6 +119,7 @@ class _Subprocess:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            timeout=SURVEY_SESSION_TIMEOUT_SECONDS,
             check=False,
         )
 
@@ -195,8 +201,9 @@ def nare_runner(argv: Sequence[str], *, run: Runner | None = None) -> NareResult
 
     A nonzero exit beside a parseable result line still returns the result:
     budget exhaustion exits nonzero, and that is recorded data, not a fault.
-    A nonzero exit without a result line, a missing result line, or a stdout
-    line that is not JSON raises NareError.
+    A nonzero exit without a result line, a missing result line, a stdout
+    line that is not JSON, or a child that outlives the timeout raises
+    NareError.
     """
     frozen = tuple(argv)
     executor = _Subprocess() if run is None else run
@@ -206,6 +213,12 @@ def nare_runner(argv: Sequence[str], *, run: Runner | None = None) -> NareResult
         raise NareError(
             "nare is not installed or not on PATH; progettare runs survey "
             "sessions through the nare CLI"
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        program = frozen[0] if frozen else "nare"
+        raise NareError(
+            f"{program} timed out after {SURVEY_SESSION_TIMEOUT_SECONDS}s "
+            "and was killed"
         ) from exc
     line = _decode_stdout(completed.stdout)
     if line is None:
