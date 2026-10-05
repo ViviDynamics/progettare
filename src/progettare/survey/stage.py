@@ -115,6 +115,7 @@ def answer_one_question(
     run_dir: Path,
     repo_path: str,
     budget: int,
+    suffix: str = "",
 ) -> SessionOutcome:
     """Run the one bounded session for ``question`` and record what it did.
 
@@ -131,12 +132,12 @@ def answer_one_question(
     a missing nare binary or a contract refusal is an installation fault,
     not budget exhaustion.
     """
-    schema_path = run_dir / f"q{question.number}.schema.json"
+    schema_path = run_dir / f"q{question.number}{suffix}.schema.json"
     schema_path.write_text(
         json.dumps(ANSWER_SCHEMA, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    session_path = run_dir / f"q{question.number}-session.json"
+    session_path = run_dir / f"q{question.number}{suffix}-session.json"
     argv = session_argv(
         prompt=question.text,
         system=SURVEY_SYSTEM_PROMPT,
@@ -192,6 +193,7 @@ def run_survey_stage(
     run_dir: Path,
     repo_path: str,
     written_at: str,
+    round: int = 1,
 ) -> SurveyStageResult:
     """Answer every question in the plan, one bounded session each.
 
@@ -216,6 +218,8 @@ def run_survey_stage(
     reasons: list[str] = []
     if plan.partial_reason is not None:
         reasons.append(plan.partial_reason)
+    suffix = "" if round == 1 else f"-s{round}"
+    artifact_name = "survey.json" if round == 1 else f"survey{round}.json"
     answers: list[SurveyAnswer] = []
     usages: list[NareUsage] = []
     sessions: list[str] = []
@@ -231,7 +235,7 @@ def run_survey_stage(
                 f"stage token budget exhausted: question(s) {unattempted} not attempted"
             )
             break
-        sessions.append(f"q{question.number}-session.json")
+        sessions.append(f"q{question.number}{suffix}-session.json")
         try:
             outcome = answer_one_question(
                 plan=plan,
@@ -241,6 +245,7 @@ def run_survey_stage(
                 run_dir=run_dir,
                 repo_path=repo_path,
                 budget=share,
+                suffix=suffix,
             )
         except NareError as error:
             raise NareError(
@@ -272,7 +277,7 @@ def run_survey_stage(
         "written_at": written_at,
         **record,
     }
-    path = run_dir / "survey.json"
+    path = run_dir / artifact_name
     write_survey(path, stamped)
     return SurveyStageResult(
         path=path,

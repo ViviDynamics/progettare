@@ -550,3 +550,26 @@ def test_the_package_exports_the_stage_api() -> None:
     assert progettare.survey.run_survey_stage is run_survey_stage
     assert "SURVEY_SYSTEM_PROMPT" not in progettare.survey.__all__
     assert "ANSWER_SCHEMA" not in progettare.survey.__all__
+
+
+def test_a_second_round_writes_survey2_and_names_its_sessions(
+    tmp_path: Path,
+) -> None:
+    runner = CannedRunner(make_result())
+    plan = stage_plan((1,))
+    result = run_survey_stage(
+        plan=plan,
+        runner=runner,
+        config=CONFIG,
+        run_dir=tmp_path,
+        repo_path="/repo",
+        written_at="20261005T000000Z",
+        round=2,
+    )
+    assert result.path == tmp_path / "survey2.json"
+    assert result.path.is_file()
+    assert result.sessions == ("q1-s2-session.json",)
+    assert not (tmp_path / "survey.json").exists()
+    argv = runner.argv
+    assert argv is not None
+    assert argv[argv.index("--session") + 1] == str(tmp_path / "q1-s2-session.json")

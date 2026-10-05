@@ -252,3 +252,42 @@ def formulate(ctx: CardContext, structure: RepoStructure, config: Config) -> Sur
 def plan_for(ctx: CardContext, config: Config) -> SurveyPlan:
     """Observe the repository, then formulate. The engine's entry point."""
     return formulate(ctx, observe_repo(Path(ctx.repo_path)), config)
+
+
+def plan_for_followup(
+    ctx: CardContext, section: str, questions: tuple[str, ...], config: Config
+) -> SurveyPlan:
+    """The bounded question set for the blueprint stage's follow-up ask.
+
+    The follow-up runs under the first round's caps and observes the same
+    repository. A request naming more questions than the cap allows is
+    truncated, and the artifact says so. ``questions`` are the raw texts
+    from the blueprint stage's request; ``section`` names the blueprint
+    section they feed, and is quoted in every question's criterion.
+    """
+    cap = config.survey_max_questions
+    budget = config.survey_per_question_command_budget
+    partial_reason = None
+    if len(questions) > cap:
+        dropped = ", ".join(str(n) for n in range(cap + 1, len(questions) + 1))
+        partial_reason = (
+            f"the follow-up request named {len(questions)} questions; "
+            f"{cap} is the cap, so dropped question(s) {dropped}"
+        )
+    draft = tuple(
+        SurveyQuestion(
+            number=position,
+            text=question,
+            criterion=f"blueprint follow-up: {section}",
+            command_budget=budget,
+        )
+        for position, question in enumerate(questions[:cap], start=1)
+    )
+    return SurveyPlan(
+        issue_number=ctx.issue.number,
+        repo=f"{ctx.issue.owner}/{ctx.issue.repo}",
+        structure=observe_repo(Path(ctx.repo_path)),
+        questions=draft,
+        command_budget=budget,
+        partial_reason=partial_reason,
+    )

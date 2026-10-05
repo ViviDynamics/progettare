@@ -45,7 +45,7 @@ from progettare.github import (
 )
 from progettare.issue_ref import IssueRef, IssueRefError, parse_issue_ref
 from progettare.survey.nare import NareResult, nare_runner
-from progettare.survey.questions import plan_for
+from progettare.survey.questions import plan_for, plan_for_followup
 from progettare.survey.stage import run_survey_stage
 
 CLI_DESCRIPTION = (
@@ -159,6 +159,36 @@ def run_blueprint(
         stages["blueprint"] = StageLedger(
             sessions=blueprint_result.sessions, usage=blueprint_result.usage
         )
+        if blueprint_result.followup is not None:
+            stage = "followup"
+            refresher()
+            followup_plan = plan_for_followup(
+                context,
+                blueprint_result.followup.section,
+                blueprint_result.followup.questions,
+                config,
+            )
+            followup_result = run_survey_stage(
+                followup_plan, runner, config, run_dir, repo_path, written_at, round=2
+            )
+            stages["followup"] = StageLedger(
+                sessions=followup_result.sessions, usage=followup_result.usage
+            )
+            stage = "blueprint"
+            refresher()
+            blueprint_result = run_blueprint_stage(
+                _read_artifact(run_dir / "intake.json"),
+                _read_artifact(run_dir / "survey2.json"),
+                runner,
+                config,
+                run_dir,
+                repo_path,
+                written_at,
+                followup_round=True,
+            )
+            stages["blueprint"] = StageLedger(
+                sessions=blueprint_result.sessions, usage=blueprint_result.usage
+            )
         stage = "size"
         refresher()
         blueprint_doc = _read_artifact(run_dir / "blueprint.json")
