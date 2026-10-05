@@ -10,13 +10,15 @@ from __future__ import annotations
 import json
 import pathlib
 import subprocess
+from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 import pytest
 
 from progettare.cli import BlueprintOutcome, main, run_blueprint
 from progettare.config import Config, ModelRail
-from progettare.github import Issue, IssueComment
+from progettare.github import Issue, IssueClosedError, IssueComment
 from progettare.issue_ref import parse_issue_ref
 from progettare.survey.nare import NareError, NareResult, NareUsage
 
@@ -87,9 +89,11 @@ class CannedRunner:
     def __init__(self, results: list[NareResult]) -> None:
         self.results = list(results)
         self.calls = 0
+        self.argvs: list[tuple[str, ...]] = []
 
     def run(self, argv: tuple[str, ...]) -> NareResult:
         self.calls += 1
+        self.argvs.append(argv)
         if self.calls > len(self.results):
             raise NareError("no canned result left")
         return self.results[self.calls - 1]
@@ -126,16 +130,19 @@ def run(
     tmp_path: pathlib.Path,
     issue: Issue,
     runner: Any,
+    config: Config = CONFIG,
+    ensure_open: Callable[[object], None] | None = None,
 ) -> BlueprintOutcome:
     repo = make_repo(tmp_path)
     return run_blueprint(
         parse_issue_ref("ViviDynamics/progettare#9"),
         str(repo),
-        CONFIG,
+        config,
         tmp_path / "runs",
         runner,
         issue,
         "20261005T000000Z",
+        ensure_open=ensure_open or (lambda ref: None),
     )
 
 
@@ -208,6 +215,7 @@ def test_exit_codes_distinguish_complete_blocked_and_failed(
     (tmp_path / "progettare.yaml").write_text(CONFIG_YAML, encoding="utf-8")
     issue = make_issue()
     monkeypatch.setattr("progettare.cli.load_issue", lambda ref: issue)
+    monkeypatch.setattr("progettare.cli.ensure_issue_open", lambda ref: None)
     monkeypatch.setattr("progettare.cli.NareSubprocessRunner", lambda: make_runner())
     argv = [
         "blueprint",
@@ -227,8 +235,9 @@ def test_exit_codes_distinguish_complete_blocked_and_failed(
     blocked = make_issue("Acceptance:\n- TBD")
     monkeypatch.setattr("progettare.cli.load_issue", lambda ref: blocked)
     assert main(argv) == 2
-    assert "blocked" in capsys.readouterr().err
-    assert capsys.readouterr().out == ""
+    streams = capsys.readouterr()
+    assert "blocked" in streams.err
+    assert streams.out == ""
 
     monkeypatch.setattr("progettare.cli.load_issue", lambda ref: issue)
     monkeypatch.setattr(
@@ -236,8 +245,9 @@ def test_exit_codes_distinguish_complete_blocked_and_failed(
         lambda: CannedRunner([]),
     )
     assert main(argv) == 1
-    assert "failed" in capsys.readouterr().err
-    assert capsys.readouterr().out == ""
+    streams = capsys.readouterr()
+    assert "failed" in streams.err
+    assert streams.out == ""
 
 
 def test_version_prints_the_installed_version(
@@ -249,3 +259,69 @@ def test_version_prints_the_installed_version(
     printed = capsys.readouterr().out.strip()
     assert printed
     assert printed != "0.0.0+unknown"
+
+
+def test_the_run_cap_narrows_each_stage_budget(tmp_path: pathlib.Path) -> None:
+    capped = replace(CONFIG, budget_run_max_tokens=30)
+    runner = make_runner()
+    outcome = run(tmp_path, make_issue(), runner, config=capped)
+    assert outcome.status == "complete"
+    survey_argv = runner.argvs[0]
+    assert int(survey_argv[survey_argv.index("--budget-tokens") + 1]) == 30
+    blueprint_argv = runner.argvs[1]
+    assert int(blueprint_argv[blueprint_argv.index("--budget-tokens") + 1]) == 15
+
+
+def test_an_issue_that_closes_mid_run_is_not_planned(
+    tmp_path: pathlib.Path,
+) -> None:
+    def refuses(ref: object) -> None:
+        raise IssueClosedError("the issue closed while the run ran")
+
+    outcome = run(tmp_path, make_issue(), make_runner(), ensure_open=refuses)
+    assert outcome.status == "failed"
+    assert outcome.failing_stage == "issue"
+    manifest: dict[str, Any] = json.loads(
+        (outcome.run_dir / "run.json").read_text(encoding="utf-8")
+    )
+    assert manifest["status"] == "failed"
+    assert manifest["failing_stage"] == "issue"
+
+
+def test_a_bare_issue_number_resolves_through_the_cli(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = make_repo(tmp_path)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/ViviDynamics/progettare.git",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "progettare.yaml").write_text(CONFIG_YAML, encoding="utf-8")
+    issue = make_issue()
+    monkeypatch.setattr("progettare.cli.load_issue", lambda ref: issue)
+    monkeypatch.setattr("progettare.cli.ensure_issue_open", lambda ref: None)
+    monkeypatch.setattr("progettare.cli.NareSubprocessRunner", lambda: make_runner())
+    argv = [
+        "blueprint",
+        "--issue",
+        "9",
+        "--repo",
+        str(repo),
+        "--config",
+        str(tmp_path / "progettare.yaml"),
+        "--runs-dir",
+        str(tmp_path / "runs"),
+    ]
+    assert main(argv) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "complete"

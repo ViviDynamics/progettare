@@ -1,13 +1,15 @@
 """Issue references: where the pipeline starts.
 
-An issue reaches progettare as a GitHub URL or as owner/repo#number, plus a
-repository checkout path. Both spellings resolve to the same structured
+An issue reaches progettare as a GitHub URL, as owner/repo#number, or as a
+bare number resolved against the surveyed checkout's origin, plus a
+repository checkout path. Every spelling resolves to the same structured
 reference so the rest of the pipeline never parses text again.
 """
 
 from __future__ import annotations
 
 import re
+import subprocess
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -93,3 +95,44 @@ def parse_issue_ref(text: str) -> IssueRef:
         repo=match.group("repo"),
         number=number,
     )
+
+
+_REMOTE_RE = re.compile(
+    r"^(?:https://(?:[^@/]+@)?github\.com/|git@github\.com:)"
+    r"(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+?)(?:\.git)?/?$"
+)
+
+
+def resolve_issue_ref(text: str, repo_path: str) -> IssueRef:
+    """Resolve a URL, an owner/repo#number, or a bare issue number.
+
+    A bare number is only an issue reference once the checkout says which
+    repository it belongs to, so it is resolved against the origin remote
+    and refused when that remote is absent or not GitHub.
+    """
+    candidate = text.strip() if text else ""
+    if candidate and candidate.isdigit():
+        if int(candidate) < 1:
+            raise IssueRefError(
+                f"{candidate} names issue {candidate}; GitHub numbers start at 1"
+            )
+        command = ["git", "-C", repo_path, "remote", "get-url", "origin"]
+        fetch = subprocess.run(command, capture_output=True, text=True)
+        if fetch.returncode != 0:
+            raise IssueRefError(
+                f"{candidate} is a bare issue number and {repo_path} has no "
+                "origin remote to resolve it against"
+            )
+        remote = fetch.stdout.strip()
+        match = _REMOTE_RE.match(remote)
+        if match is None:
+            raise IssueRefError(
+                f"{repo_path}'s origin remote {remote} is not a GitHub "
+                "repository, so the bare issue number cannot be resolved"
+            )
+        return IssueRef(
+            owner=match.group("owner"),
+            repo=match.group("repo"),
+            number=int(candidate),
+        )
+    return parse_issue_ref(candidate)
