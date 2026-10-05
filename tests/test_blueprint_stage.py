@@ -281,6 +281,55 @@ def test_partial_reason_reaches_the_prompt(tmp_path: Path) -> None:
     assert "stage token budget exhausted: question(s) 2" in runner.argvs[0][2]
 
 
+def test_oversized_header_truncates_but_keeps_the_task_and_errors(
+    tmp_path: Path,
+) -> None:
+    intake = make_intake()
+    intake["acceptance_criteria"] = ["criterion " + "x" * 3000 for _ in range(50)]
+    runner = CannedRunner(
+        make_result(output=INVALID_OUTPUT), make_result(output=VALID_OUTPUT)
+    )
+    result = run_blueprint_stage(
+        intake=intake,
+        survey=make_survey(),
+        runner=runner,
+        config=CONFIG,
+        run_dir=tmp_path,
+        repo_path="/tmp/repo",
+        written_at="2026-10-05T00:00:00Z",
+    )
+    first_prompt = runner.argvs[0][2]
+    assert len(first_prompt.encode("utf-8")) <= _MAX_PROMPT_BYTES
+    assert "[header truncated to fit the prompt budget]" in first_prompt
+    assert "Sequence the milestones" in first_prompt
+    reask_prompt = runner.argvs[1][2]
+    assert len(reask_prompt.encode("utf-8")) <= _MAX_PROMPT_BYTES
+    assert "milestones is an empty array" in reask_prompt
+    assert result.reasked is True
+
+
+def test_reask_errors_too_large_for_the_budget_fail_loudly(
+    tmp_path: Path,
+) -> None:
+    bad = json.dumps(
+        {
+            "milestones": [{"title": "t", "changes": ["c"]}],
+            "data_model": [],
+            "interfaces": [],
+            "risks": list(range(5000)),
+            "testable_criteria": [],
+            "documentation_topics": [],
+        }
+    )
+    runner = CannedRunner(make_result(output=bad))
+    with pytest.raises(BlueprintStageError) as raised:
+        run_stage(runner, tmp_path)
+    assert "blueprint stage" in str(raised.value)
+    assert "mandatory content alone exceeds" in str(raised.value)
+    assert runner.calls == 1
+    assert not (tmp_path / "blueprint.json").exists()
+
+
 VALID: dict[str, Any] = {
     "milestones": [{"title": "t", "changes": ["c"]}],
     "data_model": [],

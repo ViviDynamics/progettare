@@ -276,7 +276,9 @@ def _utf8_len(text: str) -> int:
     return len(text.encode("utf-8"))
 
 
-def _assembled(header: str, findings: str, tree: str | None, omitted: int) -> str:
+def _assembled(
+    header: str, findings: str, tree: str | None, omitted: int, mandatory: str
+) -> str:
     blocks = [header]
     if tree is not None:
         blocks.append(tree)
@@ -284,8 +286,7 @@ def _assembled(header: str, findings: str, tree: str | None, omitted: int) -> st
         blocks.append(findings)
     if omitted:
         blocks.append(f"[{omitted} survey finding(s) omitted to fit the prompt budget]")
-    blocks.append(_TASK_TEXT)
-    return "\n\n".join(blocks)
+    return "\n\n".join(blocks) + "\n\n" + mandatory
 
 
 def _build_prompt(
@@ -295,31 +296,44 @@ def _build_prompt(
 ) -> str:
     """The one prompt the blueprint session reads, inside the byte budget.
 
-    The header and the task are what a blueprint cannot be built without,
-    so the budget cuts survey material first: the structure tree in full,
-    then findings from the end, each cut marked in the prompt itself. The
-    re-ask text, when present, is kept: it is the correction the session
-    exists to make.
+    The task text and the re-ask's error list are mandatory: they are
+    never truncated, and the byte budget cuts survey material first --
+    findings from the end, then the structure tree, then the header from
+    its end -- with every cut marked in the prompt itself. A mandatory
+    suffix that alone exceeds the budget is an explicit stage failure,
+    not a prompt that silently launches without its instructions.
     """
-    header = "\n".join(_header_lines(intake))
+    header_lines = _header_lines(intake)
     partial = _partial_reason_line(survey)
     if partial is not None:
-        header += "\n" + partial
-    lines = _findings_lines(survey)
+        header_lines.append(partial)
+    header = "\n".join(header_lines)
     tree = _tree_line(survey)
+    findings_lines = _findings_lines(survey)
     rejection_text = "" if rejection is None else "\n\n" + _rejection_text(rejection)
+    mandatory = _TASK_TEXT + rejection_text
+    marker = "\n[header truncated to fit the prompt budget]"
+    if _utf8_len(mandatory) + _utf8_len(marker) + 2 > _MAX_PROMPT_BYTES:
+        raise BlueprintStageError(
+            "blueprint stage: the prompt's mandatory content alone exceeds "
+            f"{_MAX_PROMPT_BYTES} bytes"
+        )
 
     omitted = 0
-    prompt = _assembled(header, "\n\n".join(lines), tree, 0) + rejection_text
-    while _utf8_len(prompt) > _MAX_PROMPT_BYTES and lines:
-        lines.pop()
+    prompt = _assembled(header, "\n\n".join(findings_lines), tree, 0, mandatory)
+    while _utf8_len(prompt) > _MAX_PROMPT_BYTES and findings_lines:
+        findings_lines.pop()
         omitted += 1
-        prompt = _assembled(header, "\n\n".join(lines), tree, omitted) + rejection_text
+        prompt = _assembled(
+            header, "\n\n".join(findings_lines), tree, omitted, mandatory
+        )
+    if _utf8_len(prompt) > _MAX_PROMPT_BYTES and tree is not None:
+        prompt = _assembled(header, "", None, omitted, mandatory)
     if _utf8_len(prompt) > _MAX_PROMPT_BYTES:
-        prompt = _assembled(header, "", None, omitted) + rejection_text
-        if _utf8_len(prompt) > _MAX_PROMPT_BYTES:
-            data = prompt.encode("utf-8")[:_MAX_PROMPT_BYTES] + b"\n[truncated]"
-            prompt = data.decode("utf-8", errors="ignore")
+        budget = _MAX_PROMPT_BYTES - _utf8_len(mandatory) - _utf8_len(marker) - 2
+        data = header.encode("utf-8")[:budget]
+        header = data.decode("utf-8", errors="ignore") + marker
+        prompt = _assembled(header, "", None, 0, mandatory)
     return prompt
 
 
