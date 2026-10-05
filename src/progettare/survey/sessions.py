@@ -217,19 +217,24 @@ def render_tree(paths: tuple[str, ...], limit: int = 96_000) -> str:
     return text
 
 
-def bound_prompt(question: SurveyQuestion, structure_text: str) -> str:
+def bound_prompt(
+    question: SurveyQuestion,
+    structure_text: str,
+) -> tuple[str, bool]:
     """The complete prompt, bounded to the argument limit no matter what.
 
     The tree is budgeted around the question, but an oversized question
     text alone can still exceed the limit, so the bound is enforced on
-    the final prompt with an explicit truncation note.
+    the final prompt with an explicit truncation note. The second
+    element records whether truncation happened, so the session can
+    record that its answer covers a prefix of the question.
     """
     prompt = prompt_text(question, structure_text)
     data = prompt.encode("utf-8")
     if len(data) <= _MAX_PROMPT_BYTES:
-        return prompt
+        return prompt, False
     head = data[: _MAX_PROMPT_BYTES - 64].decode("utf-8", errors="ignore")
-    return head + "\n\n[prompt truncated to fit the argument limit]"
+    return head + "\n\n[prompt truncated to fit the argument limit]", True
 
 
 def build_session_argv(
@@ -309,9 +314,10 @@ def run_session(
     # Create and pass the resolved paths: mkdir does not expand ~, and
     # nare must see the same location the boundary check approved.
     run_resolved.mkdir(parents=True, exist_ok=True)
+    prompt, truncated = bound_prompt(question, structure_text)
     argv = build_session_argv(
         nare,
-        bound_prompt(question, structure_text),
+        prompt,
         rail,
         repo_resolved,
         run_resolved / f"survey-q{question.number}.json",
@@ -321,6 +327,11 @@ def run_session(
         spawn = _default_spawn
     proc = spawn(argv)
     state = SessionState(question, token_share)
+    if truncated:
+        state.partial_reason = (
+            "question text truncated to fit the prompt limit; "
+            "answered on a prefix of the question"
+        )
     try:
         for line in proc.stdout:
             try:

@@ -238,13 +238,44 @@ def test_bound_prompt_caps_the_complete_prompt() -> None:
         criterion=None,
         command_budget=2,
     )
-    bounded = bound_prompt(question, render_tree(("src/x.py",)))
+    bounded, truncated = bound_prompt(question, render_tree(("src/x.py",)))
     assert len(bounded.encode("utf-8")) <= _MAX_PROMPT_BYTES
     assert "prompt truncated to fit the argument limit" in bounded
+    assert truncated
 
-    ordinary = bound_prompt(make_question(1), "src/x.py")
+    ordinary, truncated = bound_prompt(make_question(1), "src/x.py")
     assert ordinary.startswith("question 1")
     assert "truncated" not in ordinary
+    assert not truncated
+
+
+def test_truncated_question_marks_the_answer_partial(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo = make_repo(tmp_path)
+    oversized = SurveyQuestion(
+        number=1,
+        text="criteria " * _MAX_PROMPT_BYTES,
+        criterion=None,
+        command_budget=2,
+    )
+
+    def spawn(argv: list[str]) -> FakeProcess:
+        return FakeProcess([cost_event(10), output_event("findings")])
+
+    state = run_session(
+        oversized,
+        RAIL,
+        repo,
+        tmp_path / "run",
+        100,
+        structure_text="",
+        spawn=spawn,
+        nare_path="/bin/nare",
+    )
+    assert state.findings == "findings"
+    assert state.partial_reason is not None
+    assert "answered on a prefix of the question" in state.partial_reason
 
 
 def test_run_session_streams_lines_and_kills_on_refusal(
