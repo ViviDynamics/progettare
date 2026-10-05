@@ -118,6 +118,12 @@ class FakeProcess:
         pass
 
 
+def make_repo(tmp_path: pathlib.Path) -> pathlib.Path:
+    repo = tmp_path / "repo"
+    repo.mkdir(exist_ok=True)
+    return repo
+
+
 def test_cost_events_accumulate_and_overrun_kills() -> None:
     state = SessionState(make_question(), token_share=100)
     state.consume(cost_event(60))
@@ -244,6 +250,7 @@ def test_bound_prompt_caps_the_complete_prompt() -> None:
 def test_run_session_streams_lines_and_kills_on_refusal(
     tmp_path: pathlib.Path,
 ) -> None:
+    repo = make_repo(tmp_path)
     lines = [bash_event("ls src"), bash_event("rm src/x.py"), output_event("x")]
     procs: list[FakeProcess] = []
 
@@ -255,7 +262,7 @@ def test_run_session_streams_lines_and_kills_on_refusal(
     state = run_session(
         make_question(),
         RAIL,
-        tmp_path,
+        repo,
         tmp_path / "run",
         100,
         spawn=spawn,
@@ -270,12 +277,13 @@ def test_run_session_streams_lines_and_kills_on_refusal(
 def test_run_session_records_an_early_exit(
     tmp_path: pathlib.Path,
 ) -> None:
+    repo = make_repo(tmp_path)
     answered = FakeProcess([output_event("done")])
     answered.returncode = 3
     state = run_session(
         make_question(),
         RAIL,
-        tmp_path,
+        repo,
         tmp_path / "run",
         100,
         spawn=lambda argv: answered,
@@ -289,7 +297,7 @@ def test_run_session_records_an_early_exit(
     state = run_session(
         make_question(),
         RAIL,
-        tmp_path,
+        repo,
         tmp_path / "run",
         100,
         spawn=lambda argv: silent,
@@ -316,7 +324,12 @@ def test_run_sessions_answers_every_question_in_budget(
 
     config = make_config(tokens=300)
     outcome = run_sessions(
-        plan, config, tmp_path, tmp_path / "run", spawn, nare_path="/bin/nare"
+        plan,
+        config,
+        make_repo(tmp_path),
+        tmp_path / "run",
+        spawn,
+        nare_path="/bin/nare",
     )
     assert outcome.partial_reason is None
     assert [answer.findings for answer in outcome.answers] == [
@@ -343,7 +356,12 @@ def test_stage_budget_exhaustion_skips_and_notes(
 
     config = make_config(tokens=100)
     outcome = run_sessions(
-        plan, config, tmp_path, tmp_path / "run", spawn, nare_path="/bin/nare"
+        plan,
+        config,
+        make_repo(tmp_path),
+        tmp_path / "run",
+        spawn,
+        nare_path="/bin/nare",
     )
     assert [answer.question for answer in outcome.answers] == [1, 2]
     assert outcome.partial_reason is not None
@@ -354,11 +372,12 @@ def test_stage_budget_exhaustion_skips_and_notes(
 def test_zero_token_share_skips_every_question(
     tmp_path: pathlib.Path,
 ) -> None:
+    repo = make_repo(tmp_path)
     plan = make_plan()
     outcome = run_sessions(
         plan,
         make_config(tokens=2),
-        tmp_path,
+        repo,
         tmp_path / "run",
         spawn_passthrough,
         nare_path="/bin/nare",
@@ -372,11 +391,12 @@ def test_zero_token_share_skips_every_question(
 def test_final_session_overrun_marks_the_stage_partial(
     tmp_path: pathlib.Path,
 ) -> None:
+    repo = make_repo(tmp_path)
     plan = make_plan(max_questions=1)
     outcome = run_sessions(
         plan,
         make_config(tokens=100),
-        tmp_path,
+        repo,
         tmp_path / "run",
         lambda argv: FakeProcess([cost_event(150)]),
         nare_path="/bin/nare",
@@ -392,11 +412,12 @@ def test_final_session_overrun_marks_the_stage_partial(
 def test_missing_usage_charges_the_share_and_names_questions(
     tmp_path: pathlib.Path,
 ) -> None:
+    repo = make_repo(tmp_path)
     plan = make_plan()
     outcome = run_sessions(
         plan,
         make_config(tokens=300),
-        tmp_path,
+        repo,
         tmp_path / "run",
         lambda argv: FakeProcess([output_event("done")]),
         nare_path="/bin/nare",
@@ -413,11 +434,12 @@ def test_missing_usage_charges_the_share_and_names_questions(
 def test_malformed_cost_usage_is_treated_as_missing(
     tmp_path: pathlib.Path,
 ) -> None:
+    repo = make_repo(tmp_path)
     plan = make_plan(max_questions=1)
     outcome = run_sessions(
         plan,
         make_config(tokens=300),
-        tmp_path,
+        repo,
         tmp_path / "run",
         lambda argv: FakeProcess([cost_event(-5), output_event("done")]),
         nare_path="/bin/nare",
@@ -429,11 +451,12 @@ def test_malformed_cost_usage_is_treated_as_missing(
 def test_malformed_cost_after_a_valid_one_fails_closed(
     tmp_path: pathlib.Path,
 ) -> None:
+    repo = make_repo(tmp_path)
     plan = make_plan(max_questions=1)
     outcome = run_sessions(
         plan,
         make_config(tokens=300),
-        tmp_path,
+        repo,
         tmp_path / "run",
         lambda argv: FakeProcess(
             [cost_event(10), cost_event(-5), output_event("done")]
@@ -447,11 +470,12 @@ def test_malformed_cost_after_a_valid_one_fails_closed(
 def test_whitespace_output_is_recorded_partial(
     tmp_path: pathlib.Path,
 ) -> None:
+    repo = make_repo(tmp_path)
     plan = make_plan(max_questions=1)
     outcome = run_sessions(
         plan,
         make_config(tokens=300),
-        tmp_path,
+        repo,
         tmp_path / "run",
         lambda argv: FakeProcess([cost_event(10), output_event("  \n")]),
         nare_path="/bin/nare",
@@ -481,14 +505,71 @@ def test_render_tree_bounds_utf8_bytes_not_code_points() -> None:
     assert "more paths omitted to fit the prompt" in bounded
 
 
+def test_render_tree_note_never_overflows_the_limit() -> None:
+    assert render_tree(("src/x.py",), limit=0) == ""
+    tiny = render_tree(("src/x.py",), limit=15)
+    assert len(tiny.encode("utf-8")) <= 15
+
+
+def test_run_directory_inside_the_repo_is_refused(
+    tmp_path: pathlib.Path,
+) -> None:
+    with pytest.raises(SurveySessionError, match="writes nothing there"):
+        run_session(
+            make_question(),
+            RAIL,
+            tmp_path,
+            tmp_path,
+            100,
+            spawn=lambda argv: FakeProcess([]),
+            nare_path="/bin/nare",
+        )
+    nested = tmp_path / "src"
+    nested.mkdir()
+    with pytest.raises(SurveySessionError, match="writes nothing there"):
+        run_session(
+            make_question(),
+            RAIL,
+            tmp_path,
+            nested,
+            100,
+            spawn=lambda argv: FakeProcess([]),
+            nare_path="/bin/nare",
+        )
+
+
+def test_truthy_non_mapping_detail_is_treated_as_malformed(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo = make_repo(tmp_path)
+    plan = make_plan(max_questions=1)
+    outcome = run_sessions(
+        plan,
+        make_config(tokens=300),
+        repo,
+        tmp_path / "run",
+        lambda argv: FakeProcess(
+            [
+                cost_event(10),
+                '{"type": "cost", "detail": [1, 2]}',
+                output_event("done"),
+            ]
+        ),
+        nare_path="/bin/nare",
+    )
+    assert outcome.partial_reason is not None
+    assert "usage missing or malformed for question(s) 1" in outcome.partial_reason
+
+
 def test_session_without_output_is_recorded_partial(
     tmp_path: pathlib.Path,
 ) -> None:
+    repo = make_repo(tmp_path)
     plan = make_plan()
     outcome = run_sessions(
         plan,
         make_config(tokens=300),
-        tmp_path,
+        repo,
         tmp_path / "run",
         lambda argv: FakeProcess([]),
         nare_path="/bin/nare",
@@ -499,6 +580,7 @@ def test_session_without_output_is_recorded_partial(
 
 
 def test_stream_error_reaps_the_child(tmp_path: pathlib.Path) -> None:
+    repo = make_repo(tmp_path)
     procs: list[FakeProcess] = []
 
     def spawn(argv: list[str]) -> FakeProcess:
@@ -510,7 +592,7 @@ def test_stream_error_reaps_the_child(tmp_path: pathlib.Path) -> None:
         run_session(
             make_question(),
             RAIL,
-            tmp_path,
+            repo,
             tmp_path / "run",
             100,
             structure_text="",
@@ -521,6 +603,7 @@ def test_stream_error_reaps_the_child(tmp_path: pathlib.Path) -> None:
 
 
 def test_non_object_json_line_fails_the_session(tmp_path: pathlib.Path) -> None:
+    repo = make_repo(tmp_path)
     procs: list[FakeProcess] = []
 
     def spawn(argv: list[str]) -> FakeProcess:
@@ -532,7 +615,7 @@ def test_non_object_json_line_fails_the_session(tmp_path: pathlib.Path) -> None:
         run_session(
             make_question(),
             RAIL,
-            tmp_path,
+            repo,
             tmp_path / "run",
             100,
             structure_text="",
@@ -545,12 +628,13 @@ def test_non_object_json_line_fails_the_session(tmp_path: pathlib.Path) -> None:
 def test_plan_partial_reason_survives_into_the_outcome(
     tmp_path: pathlib.Path,
 ) -> None:
+    repo = make_repo(tmp_path)
     plan = make_plan(max_questions=2)
     config = make_config(tokens=300)
     outcome = run_sessions(
         plan,
         config,
-        tmp_path,
+        repo,
         tmp_path / "run",
         spawn_passthrough,
         nare_path="/bin/nare",
