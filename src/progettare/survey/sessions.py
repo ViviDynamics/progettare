@@ -90,7 +90,13 @@ class SessionState:
             raise SurveySessionError(f"nare emitted a non-object JSON line: {line!r}")
         kind = event.get("type")
         if kind == "cost":
-            detail = event.get("detail") or {}
+            detail = event.get("detail")
+            if not isinstance(detail, dict):
+                # A malformed usage event makes this session's totals
+                # untrustworthy: never charged, and the stage fails
+                # closed on it just like missing usage.
+                self.usage_malformed = True
+                return
             raw_input = detail.get("input")
             raw_output = detail.get("output")
             if not (
@@ -101,9 +107,6 @@ class SessionState:
                 and raw_input >= 0
                 and raw_output >= 0
             ):
-                # A malformed usage event makes this session's totals
-                # untrustworthy: never charged, and the stage fails
-                # closed on it just like missing usage.
                 self.usage_malformed = True
                 return
             self.usage_reported = True
@@ -182,7 +185,9 @@ def render_tree(paths: tuple[str, ...], limit: int = 96_000) -> str:
     if truncated:
         notes.append(f"{truncated} more paths omitted to fit the prompt")
     if notes:
-        text += "\n" + "; ".join(notes) + "."
+        note = "\n" + "; ".join(notes) + "."
+        if len(text.encode("utf-8")) + len(note.encode("utf-8")) <= limit:
+            text += note
     return text
 
 
@@ -267,6 +272,13 @@ def run_session(
         raise SurveySessionError(
             "nare is not installed; every model call must go through nare, "
             "so the survey stage cannot run"
+        )
+    run_resolved = run_dir.expanduser().resolve()
+    repo_resolved = repo_path.expanduser().resolve()
+    if run_resolved == repo_resolved or repo_resolved in run_resolved.parents:
+        raise SurveySessionError(
+            f"run directory {run_resolved} is inside the surveyed repository "
+            f"{repo_resolved}; progettare writes nothing there"
         )
     run_dir.mkdir(parents=True, exist_ok=True)
     argv = build_session_argv(
