@@ -15,7 +15,7 @@ from typing import Any
 
 from progettare.engine.run import atomic_write_json
 
-BLUEPRINT_RECORD_VERSION = 1
+BLUEPRINT_RECORD_VERSION = 2
 
 
 class BlueprintRecordError(ValueError):

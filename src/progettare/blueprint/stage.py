@@ -66,15 +66,17 @@ BLUEPRINT_SCHEMA: dict[str, Any] = {
         "risks": {"type": "array", "items": {"type": "string"}},
         "testable_criteria": {"type": "array", "items": {"type": "string"}},
         "documentation_topics": {"type": "array", "items": {"type": "string"}},
+        "followup": {
+            "type": "object",
+            "properties": {
+                "section": {"type": "string"},
+                "questions": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["section", "questions"],
+            "additionalProperties": False,
+        },
     },
-    "required": [
-        "milestones",
-        "data_model",
-        "interfaces",
-        "risks",
-        "testable_criteria",
-        "documentation_topics",
-    ],
+    "required": [],
     "additionalProperties": False,
 }
 
@@ -129,6 +131,21 @@ class BlueprintStageError(RuntimeError):
         self.usage = usage
 
 
+@dataclass(frozen=True)
+class FollowupRequest:
+    """The blueprint author's ask for one more bounded survey round.
+
+    A follow-up is data, not conversation: the section the survey
+    starved, the questions to ask, and the ledger of the session that
+    made the request, so the run's manifest stays complete.
+    """
+
+    section: str
+    questions: tuple[str, ...]
+    sessions: tuple[str, ...] = ()
+    usage: NareUsage | None = None
+
+
 def _check_string_list(section: Any, name: str, errors: list[str]) -> None:
     if not isinstance(section, list):
         errors.append(f"{name} is not an array")
@@ -166,18 +183,27 @@ def _check_milestone(item: Any, position: int, errors: list[str]) -> None:
 def validate_blueprint(payload: object) -> tuple[str, ...]:
     """Every reason the payload is not a valid blueprint; empty means valid.
 
-    This is the code-enforced schema: required fields, types, and
-    non-empty milestones, independent of what nare's --schema checked.
-    The subset cannot express minItems or minLength, so those rules live
-    here. Errors are collected all rather than first-failure, because the
-    re-ask hands the model the whole list.
+    This is the code-enforced schema. A payload answers either with the
+    one blueprint (all six sections, well typed) or with a follow-up
+    request naming the one section the survey starved and the questions
+    to ask, never both. Errors are collected all rather than
+    first-failure, because the re-ask hands the model the whole list.
     """
     if not isinstance(payload, dict):
         return ("the blueprint payload is not a JSON object",)
     errors: list[str] = []
-    unknown = sorted(set(payload) - set(_BLUEPRINT_KEYS), key=str)
+    unknown = sorted(set(payload) - set(_BLUEPRINT_KEYS) - {"followup"}, key=str)
     if unknown:
         errors.append("unknown key(s): " + ", ".join(str(key) for key in unknown))
+    if "followup" in payload:
+        errors.extend(_validate_followup(payload["followup"]))
+        missing = [name for name in _BLUEPRINT_KEYS if name in payload]
+        if missing:
+            errors.append(
+                "a follow-up request carries no section content: "
+                + ", ".join(sorted(missing))
+            )
+        return tuple(errors)
     missing = [name for name in _BLUEPRINT_KEYS if name not in payload]
     if missing:
         errors.append(f"missing key(s): {', '.join(missing)}")
@@ -199,15 +225,58 @@ def validate_blueprint(payload: object) -> tuple[str, ...]:
     return tuple(errors)
 
 
-def _build_blueprint(output: str) -> tuple[BlueprintRecord | None, tuple[str, ...]]:
-    """The built BlueprintRecord, or (None, every reason the payload fails)."""
+def _validate_followup(payload: object) -> list[str]:
+    """Every reason the follow-up request is unusable, in the caller's words."""
+    errors: list[str] = []
+    if not isinstance(payload, dict):
+        return ["the follow-up request is not a JSON object"]
+    section = payload.get("section")
+    if section not in _STRING_SECTIONS:
+        errors.append(
+            "the follow-up request names a section the survey can feed: "
+            f"one of {', '.join(_STRING_SECTIONS)}, not {section!r}"
+        )
+    questions = payload.get("questions")
+    if not isinstance(questions, list) or not questions:
+        errors.append("the follow-up request asks at least one follow-up question")
+    else:
+        for position, question in enumerate(questions):
+            if not isinstance(question, str) or not question.strip():
+                errors.append(
+                    f"followup.questions[{position}] is not a nonempty string"
+                )
+    return errors
+
+
+def _build_blueprint(
+    output: str, question_cap: int
+) -> tuple[BlueprintRecord | None, FollowupRequest | None, tuple[str, ...]]:
+    """The built record or request, or every reason the payload fails."""
     try:
         document = json.loads(output)
     except json.JSONDecodeError as error:
-        return None, (f"the blueprint payload is not valid JSON: {error}",)
+        return None, None, (f"the blueprint payload is not valid JSON: {error}",)
     errors = validate_blueprint(document)
     if errors:
-        return None, errors
+        return None, None, errors
+    if "followup" in document:
+        request = document["followup"]
+        questions = tuple(request["questions"])
+        if len(questions) > question_cap:
+            return (
+                None,
+                None,
+                (
+                    f"the follow-up requests {len(questions)} questions; the "
+                    f"first round's cap is at most {question_cap} "
+                    "follow-up questions",
+                ),
+            )
+        return (
+            None,
+            FollowupRequest(section=request["section"], questions=questions),
+            (),
+        )
     record = BlueprintRecord(
         milestones=tuple(
             Milestone(title=item["title"], changes=tuple(item["changes"]))
@@ -219,7 +288,7 @@ def _build_blueprint(output: str) -> tuple[BlueprintRecord | None, tuple[str, ..
         testable_criteria=tuple(document["testable_criteria"]),
         documentation_topics=tuple(document["documentation_topics"]),
     )
-    return record, ()
+    return record, None, ()
 
 
 def _string_items(section: Any) -> list[str]:
@@ -383,11 +452,12 @@ def _build_prompt(
 class BlueprintStageResult:
     """What the stage produced: the artifact, the plan, and the ledger."""
 
-    path: Path
-    blueprint: BlueprintRecord
+    path: Path | None
+    blueprint: BlueprintRecord | None
     usage: NareUsage | None
     reasked: bool
     sessions: tuple[str, ...] = ()
+    followup: FollowupRequest | None = None
 
 
 def _summed(usages: list[NareUsage]) -> NareUsage | None:
@@ -482,6 +552,34 @@ def _fail_on_budget(
         )
 
 
+def _followup_outcome(
+    followup: FollowupRequest,
+    sessions: tuple[str, ...],
+    usage: NareUsage | None,
+    followup_round: bool,
+) -> BlueprintStageResult:
+    """The request as the stage's outcome, or the refusal of a second one."""
+    if followup_round:
+        raise BlueprintStageError(
+            "blueprint stage: at most one follow-up survey round is allowed per run",
+            sessions=sessions,
+            usage=usage,
+        )
+    return BlueprintStageResult(
+        path=None,
+        blueprint=None,
+        usage=usage,
+        reasked=False,
+        sessions=sessions,
+        followup=FollowupRequest(
+            section=followup.section,
+            questions=followup.questions,
+            sessions=sessions,
+            usage=usage,
+        ),
+    )
+
+
 def run_blueprint_stage(
     intake: dict[str, Any],
     survey: dict[str, Any],
@@ -490,6 +588,7 @@ def run_blueprint_stage(
     run_dir: Path,
     repo_path: str,
     written_at: str,
+    followup_round: bool = False,
 ) -> BlueprintStageResult:
     """Turn the intake and survey artifacts into the run's one blueprint.
 
@@ -503,6 +602,13 @@ def run_blueprint_stage(
     blueprint.json never holds a partial plan. NareError propagates: a
     missing nare binary or a contract refusal is an installation fault,
     not a stage failure.
+
+    A payload may instead answer with a follow-up request: the one
+    section the survey starved and the questions to ask about it. The
+    stage returns that request without publishing, and the caller runs
+    exactly one more survey round. A request arriving on a follow-up
+    round is refused outright: at most one follow-up per run, enforced
+    here, where a second request would be honored.
     """
     budget = config.budget_blueprint_stage_tokens
     prompt = _build_prompt(intake, survey)
@@ -524,7 +630,11 @@ def run_blueprint_stage(
     if result.usage is not None:
         usages.append(result.usage)
     _fail_on_budget(result, tuple(sessions), _summed(usages))
-    record, errors = _extract(result)
+    record, followup, errors = _extract(result, config.survey_max_questions)
+    if followup is not None:
+        return _followup_outcome(
+            followup, tuple(sessions), _summed(usages), followup_round
+        )
     reasked = record is None
     if record is None:
         spent = usages[0].total_tokens if usages else 0
@@ -559,8 +669,12 @@ def run_blueprint_stage(
         if reask.usage is not None:
             usages.append(reask.usage)
         _fail_on_budget(reask, tuple(sessions), _summed(usages))
-        record, errors = _extract(reask)
+        record, followup, errors = _extract(reask, config.survey_max_questions)
         if record is None:
+            if followup is not None:
+                return _followup_outcome(
+                    followup, tuple(sessions), _summed(usages), followup_round
+                )
             raise BlueprintStageError(
                 "blueprint stage: the re-asked blueprint payload is invalid: "
                 + "; ".join(errors),
@@ -572,6 +686,7 @@ def run_blueprint_stage(
         "artifact_version": ARTIFACT_VERSION,
         "progettare": PROGETTARE_VERSION,
         "written_at": written_at,
+        "followup_round": 1 if followup_round else 0,
         **blueprint_record(record),
     }
     path = run_dir / "blueprint.json"
@@ -585,12 +700,15 @@ def run_blueprint_stage(
     )
 
 
-def _extract(result: NareResult) -> tuple[BlueprintRecord | None, tuple[str, ...]]:
-    """The record from a finished session's output, or the reasons it fails."""
+def _extract(
+    result: NareResult, question_cap: int
+) -> tuple[BlueprintRecord | None, FollowupRequest | None, tuple[str, ...]]:
+    """The record or request from a finished session, or the reasons it fails."""
     if result.status != "done" or result.output is None:
         detail = result.stop_reason or f"status {result.status}"
         return (
             None,
+            None,
             (f"the session ended without a blueprint payload ({detail})",),
         )
-    return _build_blueprint(result.output)
+    return _build_blueprint(result.output, question_cap)
