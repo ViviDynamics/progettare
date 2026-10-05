@@ -24,6 +24,7 @@ from progettare.survey.sessions import (
     SessionState,
     SurveySessionError,
     build_session_argv,
+    prompt_text,
     run_session,
     run_sessions,
 )
@@ -170,7 +171,7 @@ def test_argv_covers_the_family_adapter_flags(
 ) -> None:
     argv = build_session_argv(
         "/bin/nare",
-        make_question(3),
+        "question 3",
         RAIL,
         tmp_path,
         tmp_path / "session.json",
@@ -179,7 +180,7 @@ def test_argv_covers_the_family_adapter_flags(
     text = " ".join(argv)
     assert "/bin/nare run question 3" in text
     assert "--jsonl" in argv and "--yes" in argv
-    assert argv[argv.index("--tools") + 1] == "read,bash"
+    assert argv[argv.index("--tools") + 1] == "read"
     assert argv[argv.index("--root") + 1] == str(tmp_path)
     assert argv[argv.index("--system") + 1] == READ_ONLY_SYSTEM_PROMPT
     assert argv[argv.index("--provider") + 1] == "p"
@@ -193,9 +194,15 @@ def test_base_url_is_passed_when_the_rail_has_one(
     tmp_path: pathlib.Path,
 ) -> None:
     argv = build_session_argv(
-        "/bin/nare", make_question(), RAIL_PROXY, tmp_path, tmp_path / "s.json", 100
+        "/bin/nare", "question 1", RAIL_PROXY, tmp_path, tmp_path / "s.json", 100
     )
     assert argv[argv.index("--base-url") + 1] == "http://localhost:8000"
+
+
+def test_prompt_carries_the_question_and_file_list() -> None:
+    prompt = prompt_text(make_question(3), "src/x.py\nsrc/y.py")
+    assert prompt.startswith("question 3")
+    assert prompt.endswith("Repository files:\nsrc/x.py\nsrc/y.py")
 
 
 def test_run_session_streams_lines_and_kills_on_refusal(
@@ -318,5 +325,19 @@ def test_record_accepts_stage_partial_reason() -> None:
 def test_record_refuses_silent_command_overruns() -> None:
     plan = make_plan(max_questions=1)
     answers = (SurveyAnswer(question=1, commands=("ls", "cat", "wc"), findings="f"),)
+    with pytest.raises(SurveyRecordError, match="without naming the overrun"):
+        survey_record(plan, answers)
+
+
+def test_record_refuses_overruns_named_as_something_else() -> None:
+    plan = make_plan(max_questions=1)
+    answers = (
+        SurveyAnswer(
+            question=1,
+            commands=("ls", "cat", "wc"),
+            findings="f",
+            partial_reason="token budget exceeded: 9 tokens against a share of 5",
+        ),
+    )
     with pytest.raises(SurveyRecordError, match="without naming the overrun"):
         survey_record(plan, answers)

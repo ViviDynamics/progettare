@@ -61,7 +61,8 @@ def survey_record(
         seen.add(answer.question)
         question = by_number[answer.question]
         over_budget = len(answer.commands) > question.command_budget
-        if over_budget and not answer.partial_reason:
+        names_overrun = "command budget exceeded" in (answer.partial_reason or "")
+        if over_budget and not names_overrun:
             raise SurveyRecordError(
                 f"question {answer.question} ran {len(answer.commands)} "
                 f"commands against a budget of {question.command_budget} "

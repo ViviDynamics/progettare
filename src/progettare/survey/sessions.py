@@ -1,12 +1,14 @@
 """Bounded read-only nare sessions: one per survey question.
 
 Every model call progettare makes goes through the nare CLI, never
-directly to a provider. Each question gets its own session with only the
-read and bash tools, and this module reads the JSONL stream as it runs:
-every bash command the model proposes is checked against the read-only
-allowlist before it executes, and the session is killed the moment a
-command or token budget is exceeded. The refusal is recorded as data and
-the stage continues, per the family adapter pattern.
+directly to a provider. Each question gets its own session limited to
+the read tool (nare executes bash itself, so a parent-side check could
+only observe a forbidden command after it ran; the only airtight
+read-only guarantee is to not give the session a bash tool at all).
+This module reads the JSONL stream as it runs: every bash tool_use the
+model somehow emits is refused live, and the session is killed the
+moment a command or token budget is exceeded. The refusal is recorded
+as data and the stage continues, per the family adapter pattern.
 """
 
 from __future__ import annotations
@@ -38,13 +40,13 @@ class SessionProcess(Protocol):
 
 READ_ONLY_SYSTEM_PROMPT = (
     "You are a read-only codebase surveyor. You answer one question about "
-    "the repository you are rooted in, using only read actions. You never "
-    "write, edit, move, or delete anything, and you never run a command "
-    "that could. When you have enough evidence, stop and state your "
-    "findings plainly: file paths, symbols, and what the question asked."
+    "the repository you are rooted in. Your only tool is read: there is no "
+    "bash, write, or edit, and you must never try to work around that. The "
+    "prompt lists the repository's files; read the ones you need and answer "
+    "with specific file paths, symbols, and what the question asked."
 )
 
-_READ_ONLY_TOOLS = "read,bash"
+_READ_ONLY_TOOLS = "read"
 
 
 class SurveySessionError(ValueError):
@@ -113,9 +115,15 @@ class SessionState:
         self.exceeded = True
 
 
+def prompt_text(question: SurveyQuestion, structure_text: str) -> str:
+    """The session prompt: the question plus the repository's file list."""
+    files = f"\n\nRepository files:\n{structure_text}" if structure_text else ""
+    return f"{question.text}{files}"
+
+
 def build_session_argv(
     nare_path: str,
-    question: SurveyQuestion,
+    prompt: str,
     rail: ModelRail,
     repo_path: Path,
     session_path: Path,
@@ -125,7 +133,7 @@ def build_session_argv(
     argv = [
         nare_path,
         "run",
-        question.text,
+        prompt,
         "--jsonl",
         "--yes",
         "--tools",
@@ -162,13 +170,14 @@ def run_session(
     repo_path: Path,
     run_dir: Path,
     token_share: int,
+    structure_text: str = "",
     spawn: Callable[[list[str]], SessionProcess] | None = None,
     nare_path: str | None = None,
 ) -> SessionState:
     """One bounded nare session, read live and killed on refusal.
 
     ``spawn`` builds the process; the default runs the nare CLI. The
-    stream is consumed as it arrives so a forbidden command or an
+    stream is consumed as it arrives so a forbidden tool call or an
     exhausted budget kills the process at the moment it happens, not
     after. The session transcript is kept at a per-question path for
     replay and audit.
@@ -182,7 +191,7 @@ def run_session(
     run_dir.mkdir(parents=True, exist_ok=True)
     argv = build_session_argv(
         nare,
-        question,
+        prompt_text(question, structure_text),
         rail,
         repo_path,
         run_dir / f"survey-q{question.number}.json",
@@ -214,7 +223,7 @@ def _default_spawn(argv: list[str]) -> SessionProcess:
     proc = subprocess.Popen(
         argv,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
         text=True,
     )
     return cast("SessionProcess", proc)
@@ -239,6 +248,7 @@ def run_sessions(
     if count == 0:
         return SurveyOutcome((), "no questions were formulated; nothing to ask")
     share = config.budget_survey_stage_tokens // count
+    structure_text = "\n".join(plan.structure.tree)
     answers: list[SurveyAnswer] = []
     unanswered: list[int] = []
     stage_used = 0
@@ -246,7 +256,16 @@ def run_sessions(
         if stage_used + share > config.budget_survey_stage_tokens:
             unanswered.append(question.number)
             continue
-        state = run_session(question, rail, repo_path, run_dir, share, spawn, nare_path)
+        state = run_session(
+            question,
+            rail,
+            repo_path,
+            run_dir,
+            share,
+            structure_text,
+            spawn,
+            nare_path,
+        )
         stage_used += state.tokens_used
         answers.append(_to_answer(question.number, state))
     partial_reason = plan.partial_reason
