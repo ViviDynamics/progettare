@@ -410,6 +410,10 @@ def run_sessions(
         answers.append(_to_answer(question.number, state))
     partial_reason = plan.partial_reason
     overran = stage_used > config.budget_survey_stage_tokens
+    if not overran and unanswered and stage_used >= config.budget_survey_stage_tokens:
+        # Usage that exactly reaches the budget did not overrun, but it
+        # still exhausted the stage: it is what left questions unasked.
+        overran = True
     reasons = []
     if overran:
         reasons.append(
