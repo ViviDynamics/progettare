@@ -94,6 +94,10 @@ def bash_event(command: str) -> str:
     )
 
 
+def read_event(path: str) -> str:
+    return json.dumps({"type": "tool_use", "text": "read", "detail": {"path": path}})
+
+
 def output_event(text: str) -> str:
     return json.dumps({"type": "output", "text": text, "detail": {}})
 
@@ -138,6 +142,19 @@ def test_command_budget_overrun_kills_the_session() -> None:
     assert state.exceeded
     assert state.partial_reason is not None
     assert "command budget exceeded" in state.partial_reason
+
+
+def test_read_tool_calls_count_toward_the_command_budget() -> None:
+    state = SessionState(make_question(command_budget=1), token_share=100)
+    state.consume(read_event("src/x.py"))
+    assert not state.exceeded
+    assert state.reads == ("src/x.py",)
+    state.consume(read_event("src/y.py"))
+    assert state.exceeded
+    assert state.partial_reason is not None
+    assert "command budget exceeded: 2 tool calls against a budget of 1" in (
+        state.partial_reason
+    )
 
 
 def test_output_event_becomes_findings() -> None:
@@ -232,18 +249,31 @@ def test_run_session_streams_lines_and_kills_on_refusal(
 def test_run_session_records_an_early_exit(
     tmp_path: pathlib.Path,
 ) -> None:
-    proc = FakeProcess([output_event("done")])
-    proc.returncode = 3
+    answered = FakeProcess([output_event("done")])
+    answered.returncode = 3
     state = run_session(
         make_question(),
         RAIL,
         tmp_path,
         tmp_path / "run",
         100,
-        spawn=lambda argv: proc,
+        spawn=lambda argv: answered,
         nare_path="/bin/nare",
     )
     assert not state.exceeded
+    assert state.partial_reason == "nare exited 3 after producing an answer"
+
+    silent = FakeProcess([])
+    silent.returncode = 3
+    state = run_session(
+        make_question(),
+        RAIL,
+        tmp_path,
+        tmp_path / "run",
+        100,
+        spawn=lambda argv: silent,
+        nare_path="/bin/nare",
+    )
     assert state.partial_reason == "nare exited 3 before answering the question"
 
 
@@ -305,6 +335,26 @@ def test_zero_token_share_skips_every_question(
     assert outcome.partial_reason is not None
     assert "survey stage budget exhausted" in outcome.partial_reason
     assert "question(s) 1, 2, 3 not asked" in outcome.partial_reason
+
+
+def test_final_session_overrun_marks_the_stage_partial(
+    tmp_path: pathlib.Path,
+) -> None:
+    plan = make_plan(max_questions=1)
+    outcome = run_sessions(
+        plan,
+        make_config(tokens=100),
+        tmp_path,
+        tmp_path / "run",
+        lambda argv: FakeProcess([cost_event(150)]),
+        nare_path="/bin/nare",
+    )
+    assert len(outcome.answers) == 1
+    assert outcome.partial_reason is not None
+    assert "survey stage budget exhausted: 150 tokens against 100" in (
+        outcome.partial_reason
+    )
+    assert "not asked" not in outcome.partial_reason
 
 
 def test_session_without_output_is_recorded_partial(
