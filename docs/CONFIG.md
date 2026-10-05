@@ -42,7 +42,7 @@ present but not a mapping, is an error.
 | Key | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `max_questions` | integer >= 1 | yes | The most questions the survey stage may ask. |
-| `per_question_command_budget` | integer >= 1 | yes | Read-only commands one survey question may spend. |
+| `per_question_command_budget` | integer >= 1 | yes | Tool calls (reads and commands) one survey session may spend. |
 
 ### `budgets`
 
