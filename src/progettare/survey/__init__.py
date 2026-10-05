@@ -18,19 +18,31 @@ from progettare.survey.questions import (
     plan_for,
     structure_from_files,
 )
+from progettare.survey.stage import (
+    SessionOutcome,
+    SurveyStageResult,
+    answer_one_question,
+    fair_share,
+    run_survey_stage,
+)
 
 __all__ = [
     "READ_ONLY_COMMANDS",
     "READ_ONLY_GIT_SUBCOMMANDS",
     "RepoStructure",
+    "SessionOutcome",
     "SurveyAnswer",
     "SurveyCommandError",
     "SurveyError",
     "SurveyPlan",
     "SurveyQuestion",
+    "SurveyStageResult",
+    "answer_one_question",
+    "fair_share",
     "formulate",
     "observe_repo",
     "plan_for",
+    "run_survey_stage",
     "structure_from_files",
     "survey_record",
     "validate_session_command",
