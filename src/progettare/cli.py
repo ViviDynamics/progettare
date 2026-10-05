@@ -151,7 +151,7 @@ def run_blueprint(
             run_dir, run_manifest(config, "complete", written_at, stages)
         )
         return BlueprintOutcome(status="complete", run_dir=run_dir)
-    except Exception as error:  # noqa: BLE001 - the manifest names the stage
+    except Exception as error:
         stages[stage] = _ledger(error)
         write_run_manifest(
             run_dir,
