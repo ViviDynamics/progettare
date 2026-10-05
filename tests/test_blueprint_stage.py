@@ -225,6 +225,13 @@ def test_reask_on_invalid_output(tmp_path: Path) -> None:
     assert "milestones is an empty array" in prompt
 
 
+def test_an_unreported_attempt_funds_no_reask(tmp_path: Path) -> None:
+    runner = CannedRunner(make_result(output=INVALID_OUTPUT, usage=None))
+    with pytest.raises(BlueprintStageError, match="no budget remains"):
+        run_stage(runner, tmp_path)
+    assert runner.calls == 1
+
+
 def test_invalid_after_reask_fails_loudly_and_publishes_nothing(
     tmp_path: Path,
 ) -> None:

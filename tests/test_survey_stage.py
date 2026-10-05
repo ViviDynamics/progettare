@@ -484,7 +484,7 @@ def test_stage_exhaustion_skips_the_rest_and_still_writes(tmp_path: Path) -> Non
     assert [answer["question"] for answer in document["answers"]] == [1]
 
 
-def test_a_session_without_usage_deducts_nothing_and_sums_nothing(
+def test_an_unreported_share_comes_off_the_pool_and_sums_nothing(
     tmp_path: Path,
 ) -> None:
     runner = StageRunner(
@@ -495,9 +495,12 @@ def test_a_session_without_usage_deducts_nothing_and_sums_nothing(
     )
     result = run_stage(runner, tmp_path, stage_plan((1, 2)))
     assert result.usage == USAGE
+    assert result.unreported_sessions == 1
     second_argv = runner.argvs[1]
     budget_index = second_argv.index("--budget-tokens")
-    assert second_argv[budget_index + 1] == "1200"
+    # The unreported session's 600-token share is what it may have spent,
+    # so the pool it leaves for the next question shrinks by that much.
+    assert second_argv[budget_index + 1] == "600"
 
 
 def test_an_answer_beyond_the_command_budget_fails_the_stage_loudly(

@@ -171,6 +171,7 @@ class SurveyStageResult:
     usage: NareUsage | None
     partial_reasons: tuple[str, ...]
     sessions: tuple[str, ...] = ()
+    unreported_sessions: int = 0
 
 
 def _aggregate_usage(usages: list[NareUsage]) -> NareUsage | None:
@@ -200,11 +201,12 @@ def run_survey_stage(
     Each session launches with its fair share of the stage's token
     budget, and the usage the session reports is deducted from the ledger
     before the next question launches; a session that reports no usage
-    deducts nothing. The first question the ledger cannot fund ends the
-    loop: the questions it did not attempt are named in the stage's
-    partial reason, and the artifact is still written. A session that ran
-    but produced no usable answer marks only its own question partial,
-    and the stage continues with the next question.
+    keeps its whole allocated share off the pool, because the share is
+    what it may have consumed. The first question the ledger cannot fund
+    ends the loop: the questions it did not attempt are named in the
+    stage's partial reason, and the artifact is still written. A session
+    that ran but produced no usable answer marks only its own question
+    partial, and the stage continues with the next question.
 
     The record is built through survey_record, so an over-budget or
     non-allowlisted command trace, a duplicate or unknown question
@@ -223,6 +225,7 @@ def run_survey_stage(
     answers: list[SurveyAnswer] = []
     usages: list[NareUsage] = []
     sessions: list[str] = []
+    unreported = 0
     remaining = config.budget_survey_stage_tokens
     questions_remaining = len(plan.questions)
     for position, question in enumerate(plan.questions):
@@ -256,6 +259,13 @@ def run_survey_stage(
         if outcome.usage is not None:
             remaining -= outcome.usage.total_tokens
             usages.append(outcome.usage)
+        else:
+            # A session that ran but did not report usage still spent real
+            # tokens, and its allocated share is what it may have consumed,
+            # so the share comes off the pool; otherwise later questions
+            # spend tokens the stage budget already handed out.
+            remaining -= share
+            unreported += 1
         questions_remaining -= 1
         if outcome.answer is not None:
             answers.append(outcome.answer)
@@ -285,4 +295,5 @@ def run_survey_stage(
         usage=_aggregate_usage(usages),
         partial_reasons=tuple(reasons),
         sessions=tuple(sessions),
+        unreported_sessions=unreported,
     )
