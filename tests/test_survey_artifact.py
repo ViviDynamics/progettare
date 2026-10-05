@@ -78,6 +78,7 @@ def test_record_is_versioned_and_structured() -> None:
         {
             "question": 1,
             "commands": ["ls"],
+            "reads": [],
             "findings": "found",
             "partial": None,
         }
@@ -93,6 +94,28 @@ def test_answer_commands_over_budget_are_refused() -> None:
     )
     with pytest.raises(SurveyRecordError, match="budget of 2"):
         survey_record(plan, answers)
+
+
+def test_answer_reads_count_toward_the_budget() -> None:
+    plan = make_plan(5)
+    over = SurveyAnswer(
+        question=1,
+        commands=(),
+        findings="f",
+        reads=("a.py", "b.py", "c.py"),
+    )
+    with pytest.raises(SurveyRecordError, match="3 tool calls against a budget of 2"):
+        survey_record(plan, (over,))
+
+    named = SurveyAnswer(
+        question=1,
+        commands=(),
+        findings="f",
+        partial_reason="command budget exceeded: 3 tool calls against a budget of 2",
+        reads=("a.py", "b.py", "c.py"),
+    )
+    record = survey_record(plan, (named,))
+    assert record["answers"][0]["reads"] == ["a.py", "b.py", "c.py"]
 
 
 def test_answer_for_unknown_question_is_refused() -> None:
