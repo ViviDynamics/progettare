@@ -8,6 +8,14 @@ from progettare.blueprint.artifact import (
     blueprint_record,
     write_blueprint,
 )
+from progettare.blueprint.size import (
+    MILESTONE_LOOP,
+    SINGLE_TURN,
+    SIZE_RECORD_VERSION,
+    SizeStageError,
+    classify_size,
+    write_size,
+)
 from progettare.blueprint.stage import (
     BLUEPRINT_SCHEMA,
     BLUEPRINT_SYSTEM_PROMPT,
@@ -25,9 +33,15 @@ __all__ = [
     "BlueprintRecordError",
     "BlueprintStageError",
     "BlueprintStageResult",
+    "MILESTONE_LOOP",
     "Milestone",
+    "SINGLE_TURN",
+    "SIZE_RECORD_VERSION",
+    "SizeStageError",
     "blueprint_record",
+    "classify_size",
     "run_blueprint_stage",
     "validate_blueprint",
     "write_blueprint",
+    "write_size",
 ]
