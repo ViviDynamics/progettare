@@ -24,7 +24,13 @@ from progettare.blueprint.artifact import (
 )
 from progettare.config import Config
 from progettare.contract import ARTIFACT_VERSION, PROGETTARE_VERSION
-from progettare.survey.nare import NareResult, NareRunner, NareUsage, session_argv
+from progettare.survey.nare import (
+    NareError,
+    NareResult,
+    NareRunner,
+    NareUsage,
+    session_argv,
+)
 
 BLUEPRINT_SYSTEM_PROMPT = (
     "You are the blueprint author. Work only from the intake and survey "
@@ -104,7 +110,23 @@ _TASK_TEXT = (
 
 
 class BlueprintStageError(RuntimeError):
-    """The blueprint stage failed the run, naming itself and the reason."""
+    """The blueprint stage failed the run, naming itself and the reason.
+
+    The stage failed, but the sessions that launched already ran, so the
+    error carries the ledger a failed-run manifest needs: the session
+    files launched and the usage their JSONL result lines reported.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        sessions: tuple[str, ...] = (),
+        usage: NareUsage | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.sessions = sessions
+        self.usage = usage
 
 
 def _check_string_list(section: Any, name: str, errors: list[str]) -> None:
@@ -365,6 +387,7 @@ class BlueprintStageResult:
     blueprint: BlueprintRecord
     usage: NareUsage | None
     reasked: bool
+    sessions: tuple[str, ...] = ()
 
 
 def _summed(usages: list[NareUsage]) -> NareUsage | None:
@@ -408,11 +431,54 @@ def _launch(
     return runner.run(argv)
 
 
-def _fail_on_budget(result: NareResult) -> None:
-    """Budget exhaustion fails the run instead of publishing a cut-off plan."""
+def _launch_with_ledger(
+    runner: NareRunner,
+    config: Config,
+    prompt: str,
+    schema_path: Path,
+    run_dir: Path,
+    repo_path: str,
+    budget: int,
+    session_name: str,
+    sessions: tuple[str, ...],
+    usage: NareUsage | None,
+) -> NareResult:
+    """One session launch, with the ledger attached when nare itself faults.
+
+    A session that faults reports no usage, so the ledger carries what
+    the completed sessions reported, and nothing is estimated for the
+    faulted one.
+    """
+    try:
+        return _launch(
+            runner,
+            config,
+            prompt,
+            schema_path,
+            run_dir,
+            repo_path,
+            budget,
+            session_name,
+        )
+    except NareError as error:
+        raise NareError(str(error), sessions=sessions, usage=usage) from error
+
+
+def _fail_on_budget(
+    result: NareResult,
+    sessions: tuple[str, ...],
+    usage: NareUsage | None,
+) -> None:
+    """Budget exhaustion fails the run instead of publishing a cut-off plan.
+
+    The session that exhausted its budget already ran, so the failure
+    carries the ledger the failed-run manifest needs.
+    """
     if result.stop_reason == "budget":
         raise BlueprintStageError(
-            "blueprint stage: the nare session exhausted its token budget"
+            "blueprint stage: the nare session exhausted its token budget",
+            sessions=sessions,
+            usage=usage,
         )
 
 
@@ -441,7 +507,9 @@ def run_blueprint_stage(
     budget = config.budget_blueprint_stage_tokens
     prompt = _build_prompt(intake, survey)
     schema_path = _write_schema(run_dir)
-    result = _launch(
+    usages: list[NareUsage] = []
+    sessions: list[str] = ["blueprint-session.json"]
+    result = _launch_with_ledger(
         runner,
         config,
         prompt,
@@ -450,11 +518,12 @@ def run_blueprint_stage(
         repo_path,
         budget,
         "blueprint-session.json",
+        tuple(sessions),
+        _summed(usages),
     )
-    usages: list[NareUsage] = []
     if result.usage is not None:
         usages.append(result.usage)
-    _fail_on_budget(result)
+    _fail_on_budget(result, tuple(sessions), _summed(usages))
     record, errors = _extract(result)
     reasked = record is None
     if record is None:
@@ -463,10 +532,19 @@ def run_blueprint_stage(
         if remaining <= 0:
             raise BlueprintStageError(
                 "blueprint stage: no budget remains for the bounded re-ask: "
-                + "; ".join(errors)
+                + "; ".join(errors),
+                sessions=tuple(sessions),
+                usage=_summed(usages),
             )
-        reask_prompt = _build_prompt(intake, survey, errors)
-        reask = _launch(
+        reask_prompt: str
+        try:
+            reask_prompt = _build_prompt(intake, survey, errors)
+        except BlueprintStageError as error:
+            raise BlueprintStageError(
+                str(error), sessions=tuple(sessions), usage=_summed(usages)
+            ) from error
+        sessions.append("blueprint-reask-session.json")
+        reask = _launch_with_ledger(
             runner,
             config,
             reask_prompt,
@@ -475,15 +553,19 @@ def run_blueprint_stage(
             repo_path,
             remaining,
             "blueprint-reask-session.json",
+            tuple(sessions),
+            _summed(usages),
         )
         if reask.usage is not None:
             usages.append(reask.usage)
-        _fail_on_budget(reask)
+        _fail_on_budget(reask, tuple(sessions), _summed(usages))
         record, errors = _extract(reask)
         if record is None:
             raise BlueprintStageError(
                 "blueprint stage: the re-asked blueprint payload is invalid: "
-                + "; ".join(errors)
+                + "; ".join(errors),
+                sessions=tuple(sessions),
+                usage=_summed(usages),
             )
     stamped: dict[str, Any] = {
         "artifact": "blueprint",
@@ -499,6 +581,7 @@ def run_blueprint_stage(
         blueprint=record,
         usage=_summed(usages),
         reasked=reasked,
+        sessions=tuple(sessions),
     )
 
 
