@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from progettare.blueprint.size import classify_size, write_size
+from progettare.blueprint.slices import slice_briefs, write_briefs
 from progettare.config import Config, ModelRail
 from progettare.engine.replay import ReplayError, replay_run
 
@@ -38,7 +39,8 @@ def make_blueprint(milestone_count: int = 3) -> dict[str, Any]:
         "milestones": [
             {"title": f"m{n}", "changes": ["c"]} for n in range(milestone_count)
         ],
-        "documentation_topics": ["t0", "t1"],
+        "testable_criteria": ["t0", "t1"],
+        "documentation_topics": ["d0", "d1"],
     }
 
 
@@ -142,6 +144,78 @@ def test_a_malformed_blueprint_names_the_file(tmp_path: pathlib.Path) -> None:
     with pytest.raises(ReplayError) as raised:
         replay_run(tmp_path, CONFIG)
     assert "blueprint.json" in str(raised.value)
+
+
+def make_full_run_dir(tmp_path: pathlib.Path, documenter: bool = True) -> None:
+    """A consistent run dir: blueprint, size, and briefs all agreeing."""
+    blueprint = make_blueprint()
+    blueprint["documentation_topics"] = [f"d{n}" for n in range(2 if documenter else 0)]
+    (tmp_path / "blueprint.json").write_text(
+        json.dumps(blueprint, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    size_record = classify_size(
+        blueprint,
+        CONFIG.size_single_turn_max_milestones,
+        CONFIG.size_documenter_min_topics,
+        WRITTEN_AT,
+        CONFIG.config_version,
+    )
+    write_size(tmp_path / "size.json", size_record)
+    write_briefs(
+        tmp_path,
+        slice_briefs(blueprint, size_record, WRITTEN_AT, CONFIG.config_version),
+    )
+
+
+def test_a_run_dir_with_briefs_replays_byte_identical(
+    tmp_path: pathlib.Path,
+) -> None:
+    make_full_run_dir(tmp_path)
+    result = replay_run(tmp_path, CONFIG)
+    assert result.identical is True
+    assert result.first_divergence is None
+    assert sorted(result.recomputed) == [
+        "briefs/documenter.json",
+        "briefs/implementer.json",
+        "briefs/qa.json",
+        "size.json",
+    ]
+
+
+def test_a_tampered_brief_is_named_with_its_file(tmp_path: pathlib.Path) -> None:
+    make_full_run_dir(tmp_path)
+    qa_path = tmp_path / "briefs" / "qa.json"
+    record: Any = json.loads(qa_path.read_text(encoding="utf-8"))
+    record["brief"]["testable_criteria"][0] = "tampered"
+    qa_path.write_text(
+        json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    result = replay_run(tmp_path, CONFIG)
+    assert result.identical is False
+    assert result.first_divergence == (
+        "briefs/qa.json: brief.testable_criteria[0] differs"
+    )
+
+
+def test_a_missing_expected_brief_is_a_divergence(tmp_path: pathlib.Path) -> None:
+    make_full_run_dir(tmp_path)
+    (tmp_path / "briefs" / "documenter.json").unlink()
+    result = replay_run(tmp_path, CONFIG)
+    assert result.identical is False
+    assert result.first_divergence == (
+        "briefs/documenter.json is missing from the run directory"
+    )
+
+
+def test_an_unexpected_brief_file_is_a_divergence(tmp_path: pathlib.Path) -> None:
+    make_full_run_dir(tmp_path, documenter=False)
+    extra = tmp_path / "briefs" / "documenter.json"
+    extra.write_text("{}", encoding="utf-8")
+    result = replay_run(tmp_path, CONFIG)
+    assert result.identical is False
+    assert result.first_divergence == (
+        "briefs/documenter.json is not part of the recomputed briefs"
+    )
 
 
 def test_missing_files_are_loud_failures(tmp_path: pathlib.Path) -> None:

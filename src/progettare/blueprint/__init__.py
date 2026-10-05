@@ -16,6 +16,14 @@ from progettare.blueprint.size import (
     classify_size,
     write_size,
 )
+from progettare.blueprint.slices import (
+    BRIEFS_RECORD_VERSION,
+    READERS,
+    SliceStageError,
+    brief_files,
+    slice_briefs,
+    write_briefs,
+)
 from progettare.blueprint.stage import (
     BLUEPRINT_SCHEMA,
     BLUEPRINT_SYSTEM_PROMPT,
@@ -33,15 +41,21 @@ __all__ = [
     "BlueprintRecordError",
     "BlueprintStageError",
     "BlueprintStageResult",
+    "BRIEFS_RECORD_VERSION",
     "MILESTONE_LOOP",
     "Milestone",
+    "READERS",
     "SINGLE_TURN",
     "SIZE_RECORD_VERSION",
     "SizeStageError",
+    "SliceStageError",
     "blueprint_record",
+    "brief_files",
     "classify_size",
     "run_blueprint_stage",
+    "slice_briefs",
     "validate_blueprint",
+    "write_briefs",
     "write_blueprint",
     "write_size",
 ]
