@@ -335,7 +335,7 @@ def run_session(
     if proc.returncode != 0 and not state.exceeded:
         state.partial_reason = f"nare exited {proc.returncode} " + (
             "after producing an answer"
-            if state.findings is not None
+            if (state.findings or "").strip()
             else "before answering the question"
         )
     return state

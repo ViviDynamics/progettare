@@ -16,7 +16,7 @@ from progettare.engine.run import atomic_write_json
 from progettare.survey.commands import SurveyCommandError, validate_session_commands
 from progettare.survey.questions import SurveyPlan
 
-SURVEY_RECORD_VERSION = 1
+SURVEY_RECORD_VERSION = 2
 
 
 class SurveyRecordError(ValueError):

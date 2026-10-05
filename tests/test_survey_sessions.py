@@ -292,6 +292,20 @@ def test_run_session_records_an_early_exit(
     assert not state.exceeded
     assert state.partial_reason == "nare exited 3 after producing an answer"
 
+    whitespace = FakeProcess([output_event("  \n")])
+    whitespace.returncode = 3
+    state = run_session(
+        make_question(),
+        RAIL,
+        repo,
+        tmp_path / "run",
+        100,
+        spawn=lambda argv: whitespace,
+        nare_path="/bin/nare",
+    )
+    assert not state.exceeded
+    assert state.partial_reason == "nare exited 3 before answering the question"
+
     silent = FakeProcess([])
     silent.returncode = 3
     state = run_session(
