@@ -383,6 +383,26 @@ def test_stage_budget_exhaustion_skips_and_notes(
     assert "question(s) 3 not asked" in outcome.partial_reason
 
 
+def test_exact_budget_with_unanswered_reports_exhaustion(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo = make_repo(tmp_path)
+    plan = make_plan()
+    outcome = run_sessions(
+        plan,
+        make_config(tokens=100),
+        repo,
+        tmp_path / "run",
+        lambda argv: FakeProcess([cost_event(100), output_event("x")]),
+        nare_path="/bin/nare",
+    )
+    assert outcome.partial_reason is not None
+    assert "survey stage budget exhausted: 100 tokens against 100" in (
+        outcome.partial_reason
+    )
+    assert "question(s) 2, 3 not asked" in outcome.partial_reason
+
+
 def test_zero_token_share_skips_every_question(
     tmp_path: pathlib.Path,
 ) -> None:
