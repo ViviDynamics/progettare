@@ -18,6 +18,7 @@ from progettare.blueprint.stage import (
     BLUEPRINT_SCHEMA,
     BLUEPRINT_SYSTEM_PROMPT,
     BlueprintStageError,
+    FollowupRequest,
     run_blueprint_stage,
     validate_blueprint,
 )
@@ -56,6 +57,14 @@ VALID_OUTPUT = json.dumps(
     }
 )
 INVALID_OUTPUT = json.dumps({"milestones": []})
+FOLLOWUP_OUTPUT = json.dumps(
+    {
+        "followup": {
+            "section": "risks",
+            "questions": ["What failure paths does x.py guard against?"],
+        }
+    }
+)
 
 
 def make_result(**overrides: Any) -> NareResult:
@@ -134,6 +143,19 @@ def run_stage(runner: Any, tmp_path: Path, survey: dict[str, Any] | None = None)
     )
 
 
+def run_round_stage(runner: Any, tmp_path: Path, followup_round: bool) -> Any:
+    return run_blueprint_stage(
+        intake=make_intake(),
+        survey=make_survey(),
+        runner=runner,
+        config=CONFIG,
+        run_dir=tmp_path,
+        repo_path="/tmp/repo",
+        written_at="2026-10-05T00:00:00Z",
+        followup_round=followup_round,
+    )
+
+
 def flag(argv: tuple[str, ...], name: str) -> str:
     return argv[argv.index(name) + 1]
 
@@ -144,7 +166,8 @@ def test_valid_session_writes_the_stamped_artifact(tmp_path: Path) -> None:
     assert document["artifact"] == "blueprint"
     assert document["artifact_version"] == 1
     assert document["written_at"] == "2026-10-05T00:00:00Z"
-    assert document["version"] == 1
+    assert document["version"] == 2
+    assert document["followup_round"] == 0
     assert document["milestones"] == [
         {
             "title": "Blueprint stage",
@@ -464,3 +487,98 @@ def test_validate_blueprint_accepts_a_well_typed_payload() -> None:
         "risks": ["r"],
     }
     assert validate_blueprint(document) == ()
+
+
+def test_a_first_attempt_followup_request_returns_the_request(
+    tmp_path: Path,
+) -> None:
+    result = run_stage(CannedRunner(make_result(output=FOLLOWUP_OUTPUT)), tmp_path)
+    assert result.blueprint is None
+    assert result.path is None
+    assert result.followup is not None
+    assert result.followup == FollowupRequest(
+        section="risks",
+        questions=("What failure paths does x.py guard against?",),
+        sessions=("blueprint-session.json",),
+        usage=USAGE,
+    )
+    assert result.usage is not None
+    assert result.usage.total_tokens == 15
+    names = [path.name for path in tmp_path.iterdir()]
+    assert "blueprint.json" not in names
+    assert "blueprint.schema.json" in names
+
+
+def test_a_followup_request_alongside_content_enters_the_reask(
+    tmp_path: Path,
+) -> None:
+    both = json.dumps(
+        {
+            "followup": {"section": "risks", "questions": ["why?"]},
+            "milestones": [{"title": "t", "changes": ["c"]}],
+            "data_model": [],
+            "interfaces": [],
+            "risks": [],
+            "testable_criteria": [],
+            "documentation_topics": [],
+        }
+    )
+    runner = CannedRunner(make_result(output=both), make_result(output=VALID_OUTPUT))
+    result = run_stage(runner, tmp_path)
+    assert runner.calls == 2
+    assert result.reasked is True
+    prompt = runner.argvs[1][2]
+    assert "follow-up request carries no section content" in prompt
+
+
+def test_an_oversized_followup_request_enters_the_reask(tmp_path: Path) -> None:
+    oversized = json.dumps(
+        {
+            "followup": {
+                "section": "risks",
+                "questions": [f"question {n}" for n in range(1, 7)],
+            }
+        }
+    )
+    runner = CannedRunner(
+        make_result(output=oversized), make_result(output=VALID_OUTPUT)
+    )
+    result = run_stage(runner, tmp_path)
+    assert runner.calls == 2
+    assert result.reasked is True
+    prompt = runner.argvs[1][2]
+    assert "at most 5 follow-up questions" in prompt
+
+
+def test_a_request_on_the_followup_round_fails_the_run(tmp_path: Path) -> None:
+    runner = CannedRunner(make_result(output=FOLLOWUP_OUTPUT))
+    with pytest.raises(BlueprintStageError) as raised:
+        run_round_stage(runner, tmp_path, followup_round=True)
+    assert "at most one follow-up survey round" in str(raised.value)
+    assert raised.value.sessions == ("blueprint-session.json",)
+
+
+def test_the_followup_round_stamps_the_artifact(tmp_path: Path) -> None:
+    runner = CannedRunner(make_result(output=VALID_OUTPUT))
+    result = run_round_stage(runner, tmp_path, followup_round=True)
+    document = json.loads(result.path.read_text(encoding="utf-8"))
+    assert document["followup_round"] == 1
+    assert document["version"] == 2
+
+
+def test_the_schema_admits_the_followup_key_alone() -> None:
+    properties = BLUEPRINT_SCHEMA["properties"]
+    assert "followup" in properties
+    assert BLUEPRINT_SCHEMA["required"] == []
+
+
+def test_an_unknown_section_or_empty_questions_is_invalid() -> None:
+    unknown = {"followup": {"section": "milestones", "questions": ["q"]}}
+    assert any("section" in error for error in validate_blueprint(unknown))
+    empty = {"followup": {"section": "risks", "questions": []}}
+    assert any(
+        "at least one follow-up question" in error
+        for error in validate_blueprint(empty)
+    )
+    blank = {"followup": {"section": "risks", "questions": ["   "]}}
+    assert any("not a nonempty string" in error for error in validate_blueprint(blank))
