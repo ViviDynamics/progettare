@@ -665,6 +665,29 @@ def test_unexpected_tool_fails_the_read_only_tripwire(
     assert list(procs[0].stdout) == [output_event("x")]
 
 
+def test_non_string_output_fails_the_session(tmp_path: pathlib.Path) -> None:
+    repo = make_repo(tmp_path)
+    procs: list[FakeProcess] = []
+
+    def spawn(argv: list[str]) -> FakeProcess:
+        proc = FakeProcess(['{"type": "output", "text": 1}'])
+        procs.append(proc)
+        return proc
+
+    with pytest.raises(SurveySessionError, match="output event without text"):
+        run_session(
+            make_question(),
+            RAIL,
+            repo,
+            tmp_path / "run",
+            100,
+            structure_text="",
+            spawn=spawn,
+            nare_path="/bin/nare",
+        )
+    assert procs[0].killed
+
+
 def test_non_object_json_line_fails_the_session(tmp_path: pathlib.Path) -> None:
     repo = make_repo(tmp_path)
     procs: list[FakeProcess] = []
