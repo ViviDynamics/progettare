@@ -134,6 +134,16 @@ def test_partial_reason_is_recorded() -> None:
     assert "survey.max_questions is 1" in record["partial_reason"]
 
 
+def test_every_formulated_question_can_be_answered() -> None:
+    plan = make_plan(5)
+    answers = tuple(
+        SurveyAnswer(question=number, commands=("ls",), findings=f"found {number}")
+        for number in (1, 2, 3)
+    )
+    record = survey_record(plan, answers)
+    assert [answer["question"] for answer in record["answers"]] == [1, 2, 3]
+
+
 def test_write_survey_round_trips(tmp_path: pathlib.Path) -> None:
     plan = make_plan(5)
     record = survey_record(

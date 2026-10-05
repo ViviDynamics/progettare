@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 
 from progettare.config import Config
@@ -117,20 +117,29 @@ def structure_from_files(files: tuple[str, ...] | list[str]) -> RepoStructure:
 
 
 def observe_repo(repo_path: Path) -> RepoStructure:
-    """Observe the repository tree with one read-only git command."""
+    """Observe the repository tree with one read-only git command.
+
+    NUL-delimited output keeps unusual filenames verbatim; without it,
+    git quotes paths and the classifier would store quoted names.
+    """
     listing = subprocess.run(
-        ["git", "-C", str(repo_path), "ls-files"],
+        ["git", "-C", str(repo_path), "ls-files", "-z"],
         capture_output=True,
-        text=True,
-        encoding="utf-8",
         check=False,
     )
     if listing.returncode == 0:
-        files = tuple(line for line in listing.stdout.splitlines() if line)
+        files = tuple(
+            entry.decode("utf-8", "surrogateescape")
+            for entry in listing.stdout.split(b"\0")
+            if entry
+        )
         return structure_from_files(files)
     if listing.returncode == 128:
         raise SurveyError(f"{repo_path} is not a git repository; refusing to walk it")
-    raise SurveyError(f"git ls-files failed in {repo_path}: {listing.stderr.strip()}")
+    raise SurveyError(
+        f"git ls-files failed in {repo_path}: "
+        f"{listing.stderr.decode('utf-8', 'replace').strip()}"
+    )
 
 
 def _touched_for(criterion: str, tree: tuple[str, ...]) -> tuple[str, ...]:
@@ -209,7 +218,10 @@ def formulate(ctx: CardContext, structure: RepoStructure, config: Config) -> Sur
                 command_budget=budget,
             )
         )
-    questions = tuple(draft[:cap])
+    questions = tuple(
+        replace(question, number=position)
+        for position, question in enumerate(draft[:cap], start=1)
+    )
     partial_reason = None
     if len(draft) > cap:
         partial_reason = (

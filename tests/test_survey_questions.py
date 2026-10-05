@@ -155,6 +155,19 @@ def test_cap_truncates_and_marks_the_plan_partial() -> None:
     assert "1 question(s) not formulated" in plan.partial_reason
 
 
+def test_structural_questions_get_unique_final_numbers() -> None:
+    plan = formulate(
+        make_ctx(criteria=("Only one criterion.",)),
+        STRUCTURE,
+        make_config(max_questions=5),
+    )
+    numbers = [q.number for q in plan.questions]
+    assert numbers == [1, 2, 3]
+    assert [q.criterion for q in plan.questions[:1]] == ["Only one criterion."]
+    assert plan.questions[1].criterion is None
+    assert plan.questions[2].criterion is None
+
+
 def test_budget_from_config_is_attached_to_every_question() -> None:
     plan = formulate(make_ctx(), STRUCTURE, make_config(budget=4))
     assert plan.command_budget == 4
@@ -188,12 +201,19 @@ def test_observe_repo_runs_read_only_git_ls_files(
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
     (repo / "tests").mkdir()
     (repo / "tests" / "test_x.py").write_text("def test_x(): pass\n")
+    (repo / "with space.py").write_text("")
+    (repo / "étoile.py").write_text("")
     subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
     subprocess.run(
         ["git", "-C", str(repo), "add", "."], check=True, capture_output=True
     )
     structure = observe_repo(repo)
-    assert structure.tree == ("pyproject.toml", "tests/test_x.py")
+    assert structure.tree == (
+        "pyproject.toml",
+        "tests/test_x.py",
+        "with space.py",
+        "étoile.py",
+    )
     assert structure.tests == ("tests/test_x.py",)
     assert structure.entry_points == ("pyproject.toml",)
 
