@@ -289,6 +289,12 @@ def _assembled(
     return "\n\n".join(blocks) + "\n\n" + mandatory
 
 
+# The three budget-driven cuts each carry a marker, and the header
+# truncation below reserves room for all of them; 256 bytes is generous
+# for the marker texts plus their separators at any reasonable count.
+_CUT_MARKERS_RESERVE = 256
+
+
 def _build_prompt(
     intake: dict[str, Any],
     survey: dict[str, Any],
@@ -299,9 +305,11 @@ def _build_prompt(
     The task text and the re-ask's error list are mandatory: they are
     never truncated, and the byte budget cuts survey material first --
     findings from the end, then the structure tree, then the header from
-    its end -- with every cut marked in the prompt itself. A mandatory
-    suffix that alone exceeds the budget is an explicit stage failure,
-    not a prompt that silently launches without its instructions.
+    its end. Every cut is marked in the prompt itself, and the header
+    truncation reserves room for the markers, the note, and the suffix,
+    so the assembled prompt cannot exceed the budget. A mandatory suffix
+    that alone exceeds the budget is an explicit stage failure, not a
+    prompt that silently launches without its instructions.
     """
     header_lines = _header_lines(intake)
     partial = _partial_reason_line(survey)
@@ -312,8 +320,9 @@ def _build_prompt(
     findings_lines = _findings_lines(survey)
     rejection_text = "" if rejection is None else "\n\n" + _rejection_text(rejection)
     mandatory = _TASK_TEXT + rejection_text
-    marker = "\n[header truncated to fit the prompt budget]"
-    if _utf8_len(mandatory) + _utf8_len(marker) + 2 > _MAX_PROMPT_BYTES:
+    header_marker = "\n[header truncated to fit the prompt budget]"
+    structure_marker = "[repository structure omitted to fit the prompt budget]"
+    if _utf8_len(mandatory) + _CUT_MARKERS_RESERVE > _MAX_PROMPT_BYTES:
         raise BlueprintStageError(
             "blueprint stage: the prompt's mandatory content alone exceeds "
             f"{_MAX_PROMPT_BYTES} bytes"
@@ -328,12 +337,22 @@ def _build_prompt(
             header, "\n\n".join(findings_lines), tree, omitted, mandatory
         )
     if _utf8_len(prompt) > _MAX_PROMPT_BYTES and tree is not None:
-        prompt = _assembled(header, "", None, omitted, mandatory)
+        tree = structure_marker
+        prompt = _assembled(header, "", tree, omitted, mandatory)
     if _utf8_len(prompt) > _MAX_PROMPT_BYTES:
-        budget = _MAX_PROMPT_BYTES - _utf8_len(mandatory) - _utf8_len(marker) - 2
-        data = header.encode("utf-8")[:budget]
-        header = data.decode("utf-8", errors="ignore") + marker
-        prompt = _assembled(header, "", None, 0, mandatory)
+        note = (
+            f"[{omitted} survey finding(s) omitted to fit the prompt budget]"
+            if omitted
+            else ""
+        )
+        reserve = _utf8_len(mandatory) + _utf8_len(header_marker) + 2
+        if tree is not None:
+            reserve += _utf8_len(tree) + 2
+        if note:
+            reserve += _utf8_len(note) + 2
+        data = header.encode("utf-8")[: _MAX_PROMPT_BYTES - reserve]
+        header = data.decode("utf-8", errors="ignore") + header_marker
+        prompt = _assembled(header, "", tree, omitted, mandatory)
     return prompt
 
 

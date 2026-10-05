@@ -308,6 +308,19 @@ def test_oversized_header_truncates_but_keeps_the_task_and_errors(
     assert result.reasked is True
 
 
+def test_oversized_tree_is_marked_and_the_prompt_stays_capped(
+    tmp_path: Path,
+) -> None:
+    survey = make_survey()
+    survey["structure"]["tree"] = ["f" * 400 for _ in range(300)]
+    runner = CannedRunner(make_result())
+    run_stage(runner, tmp_path, survey)
+    prompt = runner.argvs[0][2]
+    assert len(prompt.encode("utf-8")) <= _MAX_PROMPT_BYTES
+    assert "[repository structure omitted to fit the prompt budget]" in prompt
+    assert "Sequence the milestones" in prompt
+
+
 def test_reask_errors_too_large_for_the_budget_fail_loudly(
     tmp_path: Path,
 ) -> None:
