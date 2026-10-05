@@ -94,8 +94,13 @@ class SessionState:
             if not isinstance(detail, dict):
                 # A malformed usage event makes this session's totals
                 # untrustworthy: never charged, and the stage fails
-                # closed on it just like missing usage.
+                # closed on it just like missing usage. With no live
+                # token accounting the session cannot be allowed to
+                # keep spending, so it is killed like an overrun.
                 self.usage_malformed = True
+                self._exceed(
+                    "token budget exceeded: cost event has no usable usage object"
+                )
                 return
             raw_input = detail.get("input")
             raw_output = detail.get("output")
@@ -108,6 +113,9 @@ class SessionState:
                 and raw_output >= 0
             ):
                 self.usage_malformed = True
+                self._exceed(
+                    "token budget exceeded: cost event has malformed usage values"
+                )
                 return
             self.usage_reported = True
             self.input_tokens += raw_input

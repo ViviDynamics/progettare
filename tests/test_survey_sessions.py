@@ -602,6 +602,34 @@ def test_stream_error_reaps_the_child(tmp_path: pathlib.Path) -> None:
     assert procs[0].killed
 
 
+def test_malformed_usage_kills_the_session(tmp_path: pathlib.Path) -> None:
+    repo = make_repo(tmp_path)
+    procs: list[FakeProcess] = []
+
+    def spawn(argv: list[str]) -> FakeProcess:
+        proc = FakeProcess(
+            [cost_event(10), '{"type": "cost", "detail": [1, 2]}', output_event("x")]
+        )
+        procs.append(proc)
+        return proc
+
+    state = run_session(
+        make_question(),
+        RAIL,
+        repo,
+        tmp_path / "run",
+        100,
+        structure_text="",
+        spawn=spawn,
+        nare_path="/bin/nare",
+    )
+    assert state.exceeded
+    assert state.partial_reason is not None
+    assert "no usable usage object" in state.partial_reason
+    assert procs[0].killed
+    assert list(procs[0].stdout) == [output_event("x")]
+
+
 def test_non_object_json_line_fails_the_session(tmp_path: pathlib.Path) -> None:
     repo = make_repo(tmp_path)
     procs: list[FakeProcess] = []
