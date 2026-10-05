@@ -21,6 +21,10 @@ class ConfigError(ValueError):
 
 _STAGES = ("survey", "blueprint")
 
+# The config surface's own version: every artifact derived from a
+# validated config records it, so a replay can verify that provenance.
+CONFIG_VERSION = 1
+
 
 @dataclass(frozen=True)
 class ModelRail:
@@ -44,6 +48,7 @@ class Config:
     size_documenter_min_topics: int
     survey_rail: ModelRail
     blueprint_rail: ModelRail
+    config_version: int = CONFIG_VERSION
 
     def rail(self, stage: str) -> ModelRail:
         """The resolved rail for a named pipeline stage."""
@@ -201,6 +206,7 @@ def config_from_mapping(data: Any) -> Config:
         )
 
     return Config(
+        config_version=CONFIG_VERSION,
         survey_max_questions=_require_int(survey, "survey.max_questions", 1),
         survey_per_question_command_budget=_require_int(
             survey, "survey.per_question_command_budget", 1

@@ -48,6 +48,7 @@ def test_spec_example_loads_and_resolves_rails(tmp_path: pathlib.Path) -> None:
     assert config.budget_run_max_tokens == 300000
     assert config.size_single_turn_max_milestones == 2
     assert config.size_documenter_min_topics == 1
+    assert config.config_version == 1
     assert config.survey_rail == ModelRail(
         provider="openai",
         model="cheap-survey-model",
