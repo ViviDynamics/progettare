@@ -24,6 +24,7 @@ from progettare.survey.sessions import (
     SurveyOutcome,
     SurveySessionError,
     build_session_argv,
+    render_tree,
     run_session,
     run_sessions,
 )
@@ -45,6 +46,7 @@ __all__ = [
     "formulate",
     "observe_repo",
     "plan_for",
+    "render_tree",
     "run_session",
     "run_sessions",
     "structure_from_files",
