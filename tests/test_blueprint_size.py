@@ -44,6 +44,7 @@ def classify(
         max_milestones,
         min_topics,
         WRITTEN_AT,
+        1,
     )
 
 
@@ -76,6 +77,7 @@ def test_the_record_carries_the_derivation_inputs_and_the_stamp() -> None:
     assert record["artifact"] == "size"
     assert record["artifact_version"] == 1
     assert record["progettare"]
+    assert record["config_version"] == 1
     assert record["written_at"] == WRITTEN_AT
 
 
@@ -86,25 +88,28 @@ def test_the_same_inputs_produce_the_same_record() -> None:
 def test_a_malformed_blueprint_is_a_loud_failure() -> None:
     payload: Any = ["not", "a", "mapping"]
     with pytest.raises(SizeStageError) as raised:
-        classify_size(payload, 3, 2, WRITTEN_AT)
+        classify_size(payload, 3, 2, WRITTEN_AT, 1)
     assert "not a JSON object" in str(raised.value)
     payload = {"milestones": [], "documentation_topics": "no"}
     with pytest.raises(SizeStageError) as raised:
-        classify_size(payload, 3, 2, WRITTEN_AT)
+        classify_size(payload, 3, 2, WRITTEN_AT, 1)
     assert "documentation_topics" in str(raised.value)
     payload = {"documentation_topics": []}
     with pytest.raises(SizeStageError) as raised:
-        classify_size(payload, 3, 2, WRITTEN_AT)
+        classify_size(payload, 3, 2, WRITTEN_AT, 1)
     assert "milestones" in str(raised.value)
 
 
 def test_negative_thresholds_are_a_loud_failure() -> None:
     with pytest.raises(SizeStageError) as raised:
-        classify(max_milestones=-1)
+        classify_size(make_blueprint(), -1, 2, WRITTEN_AT, 1)
     assert "single_turn_max_milestones" in str(raised.value)
     with pytest.raises(SizeStageError) as raised:
-        classify(min_topics=-1)
+        classify_size(make_blueprint(), 3, -1, WRITTEN_AT, 1)
     assert "documenter_min_topics" in str(raised.value)
+    with pytest.raises(SizeStageError) as raised:
+        classify_size(make_blueprint(), 3, 2, WRITTEN_AT, -1)
+    assert "config_version" in str(raised.value)
 
 
 def test_write_size_round_trips(tmp_path: Path) -> None:

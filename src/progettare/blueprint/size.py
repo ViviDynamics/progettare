@@ -44,14 +44,17 @@ def classify_size(
     single_turn_max_milestones: int,
     documenter_min_topics: int,
     written_at: str,
+    config_version: int,
 ) -> dict[str, Any]:
     """Classify the ceremony from the blueprint's shape alone.
 
     The blueprint is the validated record the blueprint stage published;
     anything missing its milestone or documentation-topic arrays is a
-    loud failure here rather than a silent default. The thresholds are
-    the config values, and both the classification and the inputs that
-    produced it are recorded, so a replay can recompute and compare.
+    loud failure here rather than a silent default. The thresholds and
+    the config version come from the validated config, and the
+    classification, the thresholds, and the config version it used are
+    all recorded, so a replay can recompute and compare provenance as
+    well as bytes.
     """
     if not isinstance(blueprint, dict):
         raise SizeStageError("the blueprint record is not a JSON object")
@@ -59,6 +62,7 @@ def classify_size(
     topic_count = _count(blueprint, "documentation_topics")
     _threshold("size.single_turn_max_milestones", single_turn_max_milestones)
     _threshold("size.documenter_min_topics", documenter_min_topics)
+    _threshold("config_version", config_version)
     classification = (
         SINGLE_TURN if milestone_count <= single_turn_max_milestones else MILESTONE_LOOP
     )
@@ -67,6 +71,7 @@ def classify_size(
         "artifact": "size",
         "artifact_version": ARTIFACT_VERSION,
         "progettare": PROGETTARE_VERSION,
+        "config_version": config_version,
         "written_at": written_at,
         "classification": classification,
         "documenter": topic_count >= documenter_min_topics,
