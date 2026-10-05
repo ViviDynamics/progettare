@@ -731,6 +731,31 @@ def test_run_session_uses_resolved_paths_in_argv(
     assert transcript == f"{tmp_path.resolve() / 'runs'}/survey-q1.json"
 
 
+def test_malformed_read_event_fails_the_session(tmp_path: pathlib.Path) -> None:
+    repo = make_repo(tmp_path)
+    procs: list[FakeProcess] = []
+
+    def spawn(argv: list[str]) -> FakeProcess:
+        proc = FakeProcess(
+            ['{"type": "tool_use", "text": "read", "detail": {"path": ""}}']
+        )
+        procs.append(proc)
+        return proc
+
+    with pytest.raises(SurveySessionError, match="read event without a path"):
+        run_session(
+            make_question(),
+            RAIL,
+            repo,
+            tmp_path / "run",
+            100,
+            structure_text="",
+            spawn=spawn,
+            nare_path="/bin/nare",
+        )
+    assert procs[0].killed
+
+
 def test_non_object_json_line_fails_the_session(tmp_path: pathlib.Path) -> None:
     repo = make_repo(tmp_path)
     procs: list[FakeProcess] = []
