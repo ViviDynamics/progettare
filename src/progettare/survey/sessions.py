@@ -201,17 +201,24 @@ def run_session(
         spawn = _default_spawn
     proc = spawn(argv)
     state = SessionState(question, token_share)
-    for line in proc.stdout:
-        try:
-            state.consume(line)
-        except SurveyCommandError as error:
-            proc.kill()
-            state._exceed(f"refused read-only violation: {error}")
-            break
-        if state.exceeded:
-            proc.kill()
-            break
-    proc.wait()
+    try:
+        for line in proc.stdout:
+            try:
+                state.consume(line)
+            except SurveyCommandError as error:
+                proc.kill()
+                state._exceed(f"refused read-only violation: {error}")
+                break
+            if state.exceeded:
+                proc.kill()
+                break
+        proc.wait()
+    finally:
+        # Reap the child on every path: a killed session, an already
+        # exited one (kill is a no-op then), or a malformed stream that
+        # is about to fail loudly.
+        proc.kill()
+        proc.wait()
     if proc.returncode != 0 and not state.exceeded:
         state.partial_reason = (
             f"nare exited {proc.returncode} before answering the question"
@@ -253,7 +260,7 @@ def run_sessions(
     unanswered: list[int] = []
     stage_used = 0
     for question in plan.questions:
-        if stage_used + share > config.budget_survey_stage_tokens:
+        if share <= 0 or stage_used + share > config.budget_survey_stage_tokens:
             unanswered.append(question.number)
             continue
         state = run_session(
@@ -283,7 +290,15 @@ def run_sessions(
 
 
 def _to_answer(question_number: int, state: SessionState) -> SurveyAnswer:
-    findings = state.findings or state.partial_reason or "no output"
+    findings = state.findings
+    if findings is None:
+        # A session that never produced an output event did not answer
+        # the question; record it as partial rather than fabricating a
+        # complete answer.
+        state.partial_reason = state.partial_reason or (
+            "session ended without answering the question"
+        )
+        findings = state.partial_reason
     return SurveyAnswer(
         question=question_number,
         commands=state.commands,
