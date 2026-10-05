@@ -411,3 +411,19 @@ def test_a_run_without_a_followup_stamps_round_zero(
         (outcome.run_dir / "blueprint.json").read_text(encoding="utf-8")
     )
     assert blueprint["followup_round"] == 0
+
+
+def test_the_serve_verb_drives_the_mcp_loop(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+
+    from progettare import mcp
+
+    seen: list[Any] = []
+
+    def fake_serve(stdin: Any, stdout: Any) -> None:
+        seen.append((stdin, stdout))
+
+    monkeypatch.setattr(mcp, "serve", fake_serve)
+    assert main(["serve"]) == 0
+    assert len(seen) == 1
