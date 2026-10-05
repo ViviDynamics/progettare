@@ -164,6 +164,7 @@ class SurveyStageResult:
     answers: tuple[SurveyAnswer, ...]
     usage: NareUsage | None
     partial_reasons: tuple[str, ...]
+    sessions: tuple[str, ...] = ()
 
 
 def _aggregate_usage(usages: list[NareUsage]) -> NareUsage | None:
@@ -212,6 +213,7 @@ def run_survey_stage(
         reasons.append(plan.partial_reason)
     answers: list[SurveyAnswer] = []
     usages: list[NareUsage] = []
+    sessions: list[str] = []
     remaining = config.budget_survey_stage_tokens
     questions_remaining = len(plan.questions)
     for position, question in enumerate(plan.questions):
@@ -224,6 +226,7 @@ def run_survey_stage(
                 f"stage token budget exhausted: question(s) {unattempted} not attempted"
             )
             break
+        sessions.append(f"q{question.number}-session.json")
         outcome = answer_one_question(
             plan=plan,
             question=question,
@@ -257,4 +260,5 @@ def run_survey_stage(
         answers=tuple(answers),
         usage=_aggregate_usage(usages),
         partial_reasons=tuple(reasons),
+        sessions=tuple(sessions),
     )

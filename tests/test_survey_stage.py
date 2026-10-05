@@ -392,6 +392,16 @@ def test_a_clean_stage_records_every_answer_and_stamps_the_artifact(
     assert len(runner.argvs) == 3
 
 
+def test_the_result_names_the_sessions_the_stage_ran(tmp_path: Path) -> None:
+    runner = StageRunner([make_result(output=VALID_OUTPUT) for _ in range(3)])
+    result = run_stage(runner, tmp_path, stage_plan((1, 2, 3)))
+    assert result.sessions == (
+        "q1-session.json",
+        "q2-session.json",
+        "q3-session.json",
+    )
+
+
 def test_the_plan_partial_reason_flows_into_the_record(tmp_path: Path) -> None:
     reason = (
         "question cap reached: survey.max_questions is 1, 2 question(s) not formulated"

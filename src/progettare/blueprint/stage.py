@@ -365,6 +365,7 @@ class BlueprintStageResult:
     blueprint: BlueprintRecord
     usage: NareUsage | None
     reasked: bool
+    sessions: tuple[str, ...] = ()
 
 
 def _summed(usages: list[NareUsage]) -> NareUsage | None:
@@ -494,11 +495,15 @@ def run_blueprint_stage(
     }
     path = run_dir / "blueprint.json"
     write_blueprint(path, stamped)
+    sessions: list[str] = ["blueprint-session.json"]
+    if reasked:
+        sessions.append("blueprint-reask-session.json")
     return BlueprintStageResult(
         path=path,
         blueprint=record,
         usage=_summed(usages),
         reasked=reasked,
+        sessions=tuple(sessions),
     )
 
 

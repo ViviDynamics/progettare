@@ -138,6 +138,7 @@ def test_valid_session_writes_the_stamped_artifact(tmp_path: Path) -> None:
         }
     ]
     assert result.reasked is False
+    assert result.sessions == ("blueprint-session.json",)
     assert result.usage is not None
     assert result.usage.total_tokens == 15
     assert result.blueprint.milestones[0].title == "Blueprint stage"
@@ -172,6 +173,10 @@ def test_reask_on_invalid_output(tmp_path: Path) -> None:
     result = run_stage(runner, tmp_path)
     assert runner.calls == 2
     assert result.reasked is True
+    assert result.sessions == (
+        "blueprint-session.json",
+        "blueprint-reask-session.json",
+    )
     assert json.loads(result.path.read_text(encoding="utf-8"))["milestones"]
     reask_argv = runner.argvs[1]
     assert flag(reask_argv, "--budget-tokens") == "585"
