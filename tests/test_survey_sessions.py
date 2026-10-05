@@ -653,6 +653,37 @@ def test_non_object_json_line_fails_the_session(tmp_path: pathlib.Path) -> None:
     assert procs[0].killed
 
 
+def test_non_mapping_tool_use_detail_fails_the_session(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo = make_repo(tmp_path)
+    procs: list[FakeProcess] = []
+
+    def spawn(argv: list[str]) -> FakeProcess:
+        proc = FakeProcess(
+            [
+                bash_event("ls"),
+                '{"type": "tool_use", "text": "read", "detail": [1]}',
+                output_event("x"),
+            ]
+        )
+        procs.append(proc)
+        return proc
+
+    with pytest.raises(SurveySessionError, match="without an object payload"):
+        run_session(
+            make_question(),
+            RAIL,
+            repo,
+            tmp_path / "run",
+            100,
+            structure_text="",
+            spawn=spawn,
+            nare_path="/bin/nare",
+        )
+    assert procs[0].killed
+
+
 def test_plan_partial_reason_survives_into_the_outcome(
     tmp_path: pathlib.Path,
 ) -> None:

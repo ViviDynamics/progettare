@@ -127,7 +127,11 @@ class SessionState:
                 )
         elif kind == "tool_use":
             tool = event.get("text", "")
-            detail = event.get("detail") or {}
+            detail = event.get("detail")
+            if not isinstance(detail, dict):
+                raise SurveySessionError(
+                    f"nare emitted a tool_use event without an object payload: {line!r}"
+                )
             if tool == "bash":
                 command = str(detail.get("command", ""))
                 validate_session_command(command)
