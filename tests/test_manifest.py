@@ -61,6 +61,7 @@ def manifest(
     status: str = "complete",
     failing_stage: str | None = None,
     stages: dict[str, StageLedger] | None = None,
+    failing_reason: str | None = None,
 ) -> dict[str, Any]:
     return run_manifest(
         make_config(),
@@ -68,6 +69,7 @@ def manifest(
         "20261005T000000Z",
         STAGES if stages is None else stages,
         failing_stage=failing_stage,
+        failing_reason=failing_reason,
     )
 
 
@@ -86,6 +88,7 @@ def test_the_complete_manifest_stamps_the_run() -> None:
     assert document["written_at"] == "20261005T000000Z"
     assert document["status"] == "complete"
     assert document["failing_stage"] is None
+    assert document["failing_reason"] is None
 
 
 def test_the_ledger_names_sessions_and_usage_per_stage() -> None:
@@ -105,13 +108,17 @@ def test_the_ledger_names_sessions_and_usage_per_stage() -> None:
     }
 
 
-def test_a_partial_run_names_the_stage_that_stopped_it() -> None:
-    failed = manifest("failed", "blueprint")
+def test_a_partial_run_names_the_stage_that_stopped_it_and_why() -> None:
+    failed = manifest("failed", "blueprint", failing_reason="the validation error")
     assert failed["status"] == "failed"
     assert failed["failing_stage"] == "blueprint"
-    blocked = manifest("blocked", "survey")
+    assert failed["failing_reason"] == "the validation error"
+    blocked = manifest(
+        "blocked", "survey", failing_reason="the question went unanswered"
+    )
     assert blocked["status"] == "blocked"
     assert blocked["failing_stage"] == "survey"
+    assert blocked["failing_reason"] == "the question went unanswered"
 
 
 def test_a_manifest_refuses_contradictions() -> None:
@@ -124,6 +131,15 @@ def test_a_manifest_refuses_contradictions() -> None:
     with pytest.raises(ManifestError) as raised:
         manifest("failed", None)
     assert "names the stage that stopped it" in str(raised.value)
+    with pytest.raises(ManifestError) as raised:
+        manifest("complete", None, failing_reason="nobody stopped anything")
+    assert "names no failing stage" in str(raised.value)
+    with pytest.raises(ManifestError) as raised:
+        manifest("failed", "blueprint")
+    assert "names the reason it stopped" in str(raised.value)
+    with pytest.raises(ManifestError) as raised:
+        manifest("failed", "blueprint", failing_reason="   ")
+    assert "names the reason it stopped" in str(raised.value)
 
 
 def test_the_manifest_writes_atomically_and_round_trips(
