@@ -1,21 +1,22 @@
-"""The survey stage's single-session layer: schema, prompt, and outcome.
+"""The survey stage: one bounded session per question, one ledger, one artifact.
 
-One survey question gets one bounded nare session. This module prepares
-that session's argv, runs it through the injected runner boundary, and
-records what came back as data: the answer, the usage, and the stop
-reason. The question loop, its token ledger, and the artifact write are
-the stage's next layer, not this one.
+Each formulated question gets its own bounded nare session. The stage
+hands every session its fair share of the survey-stage token budget,
+keeps the ledger as sessions report their usage, notes each question the
+budget or its session left unanswered, and records the answers as data
+in the run's versioned survey.json.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from progettare.config import Config
-from progettare.survey.artifact import SurveyAnswer
+from progettare.contract import ARTIFACT_VERSION, PROGETTARE_VERSION
+from progettare.survey.artifact import SurveyAnswer, survey_record, write_survey
 from progettare.survey.nare import NareRunner, NareUsage, session_argv
 from progettare.survey.questions import SurveyPlan, SurveyQuestion
 
@@ -53,8 +54,9 @@ def fair_share(remaining_tokens: int, questions_remaining: int) -> int:
     rolled over; unused share stays in the caller's ledger. While
     questions remain and budget remains, the share is never less than 1,
     so a late question still gets a real chance to answer. A remaining
-    budget of 0 or less yields a share of 0, and the caller treats that
-    share as stage exhaustion.
+    budget of 0 or less yields a share of 0, and so does a
+    questions_remaining of 0 or less; the caller treats a share of 0 as
+    stage exhaustion.
     """
     if remaining_tokens <= 0 or questions_remaining <= 0:
         return 0
@@ -152,3 +154,107 @@ def answer_one_question(
         )
         return SessionOutcome(answer=None, usage=usage, stop_reason=stop_reason)
     return SessionOutcome(answer=None, usage=usage, stop_reason=result.stop_reason)
+
+
+@dataclass(frozen=True)
+class SurveyStageResult:
+    """What the stage produced: the artifact, the answers, and the ledger."""
+
+    path: Path
+    answers: tuple[SurveyAnswer, ...]
+    usage: NareUsage | None
+    partial_reasons: tuple[str, ...]
+
+
+def _aggregate_usage(usages: list[NareUsage]) -> NareUsage | None:
+    """The sessions' summed usage, or None when no session reported any."""
+    if not usages:
+        return None
+    input_total = sum(usage.input_tokens for usage in usages)
+    output_total = sum(usage.output_tokens for usage in usages)
+    return NareUsage(
+        input_tokens=input_total,
+        output_tokens=output_total,
+        total_tokens=input_total + output_total,
+    )
+
+
+def run_survey_stage(
+    plan: SurveyPlan,
+    runner: NareRunner,
+    config: Config,
+    run_dir: Path,
+    repo_path: str,
+    written_at: str,
+) -> SurveyStageResult:
+    """Answer every question in the plan, one bounded session each.
+
+    Each session launches with its fair share of the stage's token
+    budget, and the usage the session reports is deducted from the ledger
+    before the next question launches; a session that reports no usage
+    deducts nothing. The first question the ledger cannot fund ends the
+    loop: the questions it did not attempt are named in the stage's
+    partial reason, and the artifact is still written. A session that ran
+    but produced no usable answer marks only its own question partial,
+    and the stage continues with the next question.
+
+    The record is built through survey_record, so an over-budget or
+    non-allowlisted command trace, a duplicate or unknown question
+    number, or empty findings raise SurveyRecordError instead of being
+    recorded; NareError from a session propagates, an installation fault
+    rather than budget exhaustion. The written artifact carries the same
+    stamps as intake.json: artifact, artifact_version, progettare,
+    written_at, with the record's own version key kept as survey_record
+    wrote it.
+    """
+    reasons: list[str] = []
+    if plan.partial_reason is not None:
+        reasons.append(plan.partial_reason)
+    answers: list[SurveyAnswer] = []
+    usages: list[NareUsage] = []
+    remaining = config.budget_survey_stage_tokens
+    questions_remaining = len(plan.questions)
+    for position, question in enumerate(plan.questions):
+        share = fair_share(remaining, questions_remaining)
+        if share == 0:
+            unattempted = ", ".join(
+                str(skipped.number) for skipped in plan.questions[position:]
+            )
+            reasons.append(
+                f"stage token budget exhausted: question(s) {unattempted} not attempted"
+            )
+            break
+        outcome = answer_one_question(
+            plan=plan,
+            question=question,
+            runner=runner,
+            config=config,
+            run_dir=run_dir,
+            repo_path=repo_path,
+            budget=share,
+        )
+        if outcome.usage is not None:
+            remaining -= outcome.usage.total_tokens
+            usages.append(outcome.usage)
+        questions_remaining -= 1
+        if outcome.answer is not None:
+            answers.append(outcome.answer)
+        else:
+            reasons.append(f"question {question.number}: {outcome.stop_reason}")
+    combined = "; ".join(reasons) if reasons else None
+    record = survey_record(replace(plan, partial_reason=combined), tuple(answers))
+    stamped: dict[str, Any] = {
+        "artifact": "survey",
+        "artifact_version": ARTIFACT_VERSION,
+        "progettare": PROGETTARE_VERSION,
+        "written_at": written_at,
+        **record,
+    }
+    path = run_dir / "survey.json"
+    write_survey(path, stamped)
+    return SurveyStageResult(
+        path=path,
+        answers=tuple(answers),
+        usage=_aggregate_usage(usages),
+        partial_reasons=tuple(reasons),
+    )
