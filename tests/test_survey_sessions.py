@@ -384,7 +384,7 @@ def test_zero_token_share_skips_every_question(
     )
     assert outcome.answers == ()
     assert outcome.partial_reason is not None
-    assert "survey stage budget exhausted" in outcome.partial_reason
+    assert "survey stage budget exhausted" not in outcome.partial_reason
     assert "question(s) 1, 2, 3 not asked" in outcome.partial_reason
 
 
@@ -427,6 +427,7 @@ def test_missing_usage_charges_the_share_and_names_questions(
     assert (
         "usage missing or malformed for question(s) 1, 2, 3" in outcome.partial_reason
     )
+    assert "survey stage budget exhausted" not in outcome.partial_reason
     assert "not asked" not in outcome.partial_reason
     assert "tokens against" not in outcome.partial_reason
 
@@ -626,6 +627,40 @@ def test_malformed_usage_kills_the_session(tmp_path: pathlib.Path) -> None:
     assert state.exceeded
     assert state.partial_reason is not None
     assert "no usable usage object" in state.partial_reason
+    assert procs[0].killed
+    assert list(procs[0].stdout) == [output_event("x")]
+
+
+def test_unexpected_tool_fails_the_read_only_tripwire(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo = make_repo(tmp_path)
+    procs: list[FakeProcess] = []
+
+    def spawn(argv: list[str]) -> FakeProcess:
+        proc = FakeProcess(
+            [
+                read_event("src/x.py"),
+                '{"type": "tool_use", "text": "write", "detail": {"path": "x"}}',
+                output_event("x"),
+            ]
+        )
+        procs.append(proc)
+        return proc
+
+    state = run_session(
+        make_question(),
+        RAIL,
+        repo,
+        tmp_path / "run",
+        100,
+        structure_text="",
+        spawn=spawn,
+        nare_path="/bin/nare",
+    )
+    assert state.exceeded
+    assert state.partial_reason is not None
+    assert "refused read-only violation" in state.partial_reason
     assert procs[0].killed
     assert list(procs[0].stdout) == [output_event("x")]
 

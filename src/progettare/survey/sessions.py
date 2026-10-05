@@ -138,6 +138,10 @@ class SessionState:
                 self.commands = (*self.commands, command)
             elif tool == "read":
                 self.reads = (*self.reads, str(detail.get("path", "")))
+            else:
+                raise SurveyCommandError(
+                    f"tool {tool!r} is outside the read-only allowlist"
+                )
             self.tool_calls += 1
             if self.tool_calls > self.question.command_budget:
                 self._exceed(
@@ -394,23 +398,22 @@ def run_sessions(
         answers.append(_to_answer(question.number, state))
     partial_reason = plan.partial_reason
     overran = stage_used > config.budget_survey_stage_tokens
-    if overran or missing_usage or unanswered:
-        stage_reason = "survey stage budget exhausted"
-        if overran:
-            stage_reason += (
-                f": {stage_used} tokens against {config.budget_survey_stage_tokens}"
-            )
-        if missing_usage:
-            stage_reason += (
-                "; usage missing or malformed for question(s) "
-                f"{', '.join(str(n) for n in missing_usage)}"
-            )
-        if unanswered:
-            stage_reason += (
-                f"; question(s) {', '.join(str(n) for n in unanswered)} not asked"
-            )
+    reasons = []
+    if overran:
+        reasons.append(
+            f"survey stage budget exhausted: {stage_used} tokens "
+            f"against {config.budget_survey_stage_tokens}"
+        )
+    if missing_usage:
+        reasons.append(
+            "usage missing or malformed for question(s) "
+            f"{', '.join(str(n) for n in missing_usage)}"
+        )
+    if unanswered:
+        reasons.append(f"question(s) {', '.join(str(n) for n in unanswered)} not asked")
+    if reasons:
         partial_reason = "; ".join(
-            reason for reason in (partial_reason, stage_reason) if reason
+            reason for reason in (partial_reason, *reasons) if reason
         )
     return SurveyOutcome(tuple(answers), partial_reason)
 
