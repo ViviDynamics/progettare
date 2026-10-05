@@ -289,6 +289,63 @@ def test_stage_budget_exhaustion_skips_and_notes(
     assert "question(s) 3 not asked" in outcome.partial_reason
 
 
+def test_zero_token_share_skips_every_question(
+    tmp_path: pathlib.Path,
+) -> None:
+    plan = make_plan()
+    outcome = run_sessions(
+        plan,
+        make_config(tokens=2),
+        tmp_path,
+        tmp_path / "run",
+        spawn_passthrough,
+        nare_path="/bin/nare",
+    )
+    assert outcome.answers == ()
+    assert outcome.partial_reason is not None
+    assert "survey stage budget exhausted" in outcome.partial_reason
+    assert "question(s) 1, 2, 3 not asked" in outcome.partial_reason
+
+
+def test_session_without_output_is_recorded_partial(
+    tmp_path: pathlib.Path,
+) -> None:
+    plan = make_plan()
+    outcome = run_sessions(
+        plan,
+        make_config(tokens=300),
+        tmp_path,
+        tmp_path / "run",
+        lambda argv: FakeProcess([]),
+        nare_path="/bin/nare",
+    )
+    reason = "session ended without answering the question"
+    assert outcome.answers[0].findings == reason
+    assert outcome.answers[0].partial_reason == reason
+
+
+def test_stream_error_reaps_the_child(tmp_path: pathlib.Path) -> None:
+    procs: list[FakeProcess] = []
+
+    def spawn(argv: list[str]) -> FakeProcess:
+        proc = FakeProcess([bash_event("ls"), "not json at all", output_event("x")])
+        procs.append(proc)
+        return proc
+
+    with pytest.raises(SurveySessionError, match="non-JSON line"):
+        run_session(
+            make_question(),
+            RAIL,
+            tmp_path,
+            tmp_path / "run",
+            100,
+            structure_text="",
+            spawn=spawn,
+            nare_path="/bin/nare",
+        )
+    assert procs[0].killed
+
+
 def test_plan_partial_reason_survives_into_the_outcome(
     tmp_path: pathlib.Path,
 ) -> None:
