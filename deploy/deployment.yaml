@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: progettare-app
+  namespace: progettare
+  labels:
+    app.kubernetes.io/name: progettare
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: progettare
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: progettare
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      containers:
+        - name: app
+          image: ghcr.io/vividynamics/progettare:latest
+          imagePullPolicy: IfNotPresent
+          # The webhook receiver subcommand lands with the wiring story (#35).
+          command: ["progettare", "serve-webhook"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: PROGETTARE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: progettare-webhook
+                  key: secret
+            - name: PROGETTARE_APP_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: progettare-app-credentials
+                  key: private-key.pem
+            - name: PROGETTARE_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: progettare-app-credentials
+                  key: app-id
+          volumeMounts:
+            - name: runs
+              mountPath: /var/lib/progettare/runs
+              readOnly: false
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: runs
+          persistentVolumeClaim:
+            claimName: progettare-runs
+        - name: tmp
+          emptyDir: {}
