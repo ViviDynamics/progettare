@@ -29,6 +29,7 @@ from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any
 
+from progettare.app import APP_LOGIN, TRIGGER_LABEL
 from progettare.blueprint.size import classify_size, write_size
 from progettare.blueprint.slices import slice_briefs, write_briefs
 from progettare.blueprint.stage import run_blueprint_stage
@@ -326,11 +327,35 @@ def main(argv: list[str] | None = None) -> int:
         help="where run directories are created (default: runs/, beside the checkout)",
     )
     verbs.add_parser("serve", help="serve the ceremony over MCP stdio")
+    webhook = verbs.add_parser(
+        "serve-webhook", help="receive GitHub webhook deliveries over HTTP"
+    )
+    webhook.add_argument("--port", type=int, default=8080, help="the HTTP port")
     args = parser.parse_args(argv)
     if args.verb == "serve":
         from progettare.mcp import serve
 
         serve(sys.stdin, sys.stdout)
+        return EXIT_COMPLETE
+    if args.verb == "serve-webhook":
+        import os
+
+        from progettare.app import WebhookConfig, serve_webhook
+
+        secret = os.environ.get("PROGETTARE_WEBHOOK_SECRET", "")
+        if not secret:
+            print(
+                "progettare failed: PROGETTARE_WEBHOOK_SECRET is not set",
+                file=sys.stderr,
+            )
+            return EXIT_FAILED
+        webhook_config = WebhookConfig(
+            secret,
+            os.environ.get("PROGETTARE_REPO_PATH", ""),
+            os.environ.get("PROGETTARE_APP_LOGIN", APP_LOGIN),
+            os.environ.get("PROGETTARE_TRIGGER_LABEL", TRIGGER_LABEL),
+        )
+        serve_webhook(args.port, webhook_config)
         return EXIT_COMPLETE
     try:
         ref = resolve_issue_ref(args.issue, args.repo)
