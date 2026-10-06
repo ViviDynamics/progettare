@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: progettare
+  labels:
+    app.kubernetes.io/name: progettare
+    app.kubernetes.io/part-of: progettare
