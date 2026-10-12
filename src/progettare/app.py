@@ -133,11 +133,13 @@ class WebhookConfig:
         repo_path: str,
         login: str = APP_LOGIN,
         trigger_label: str = TRIGGER_LABEL,
+        runs_base: str | None = None,
     ) -> None:
         self.secret = secret
         self.repo_path = repo_path
         self.login = login
         self.trigger_label = trigger_label
+        self.runs_base = runs_base
 
 
 def _signed(secret: str, body: bytes, signature: str | None) -> bool:
@@ -202,17 +204,24 @@ def webhook_response(
             ]
         )
 
-    run_ceremony = ceremony if ceremony is not None else _default_ceremony
+    run_ceremony = ceremony if ceremony is not None else None
+    if run_ceremony is None:
+
+        def run_ceremony(ref: str, repo_path: str) -> dict[str, Any]:
+            return _default_ceremony(ref, repo_path, config.runs_base)
+
     outcome = handle_event(
         delivery_id, action, payload, run_ceremony, ledger, post, config.repo_path
     )
     return 200, outcome
 
 
-def _default_ceremony(ref: str, repo_path: str) -> dict[str, Any]:
+def _default_ceremony(
+    ref: str, repo_path: str, runs_base: str | None = None
+) -> dict[str, Any]:
     from progettare.mcp import default_ceremony as run_ceremony
 
-    return run_ceremony(ref, repo_path)
+    return run_ceremony(ref, repo_path, runs_base)
 
 
 def _post_gh(argv: list[str]) -> None:

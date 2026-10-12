@@ -354,6 +354,7 @@ def main(argv: list[str] | None = None) -> int:
             os.environ.get("PROGETTARE_REPO_PATH", ""),
             os.environ.get("PROGETTARE_APP_LOGIN", APP_LOGIN),
             os.environ.get("PROGETTARE_TRIGGER_LABEL", TRIGGER_LABEL),
+            os.environ.get("PROGETTARE_RUNS_BASE"),
         )
         serve_webhook(args.port, webhook_config)
         return EXIT_COMPLETE
