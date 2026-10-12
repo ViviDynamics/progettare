@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from io import StringIO
+from pathlib import Path
 from typing import Any
 
 from progettare.contract import ARTIFACT_VERSION, PROGETTARE_VERSION
@@ -129,3 +130,29 @@ def test_serve_answers_what_needs_answering() -> None:
     assert first["result"]["tools"][0]["name"] == TOOL_NAME
     second: dict[str, Any] = json.loads(lines[1])
     assert second["error"]["code"] == -32700
+
+
+def test_the_runs_base_defaults_beside_the_checkout(tmp_path: Path) -> None:
+    from progettare.mcp import resolve_runs_base
+
+    checkout = tmp_path / "checkouts" / "progettare"
+    base = resolve_runs_base(str(checkout), None)
+    assert base == tmp_path / "checkouts" / "runs"
+    assert checkout.resolve() not in base.resolve().parents
+
+
+def test_an_explicit_runs_base_wins(tmp_path: Path) -> None:
+    from progettare.mcp import resolve_runs_base
+
+    checkout = tmp_path / "checkouts" / "progettare"
+    base = resolve_runs_base(str(checkout), str(tmp_path / "artifacts"))
+    assert base == tmp_path / "artifacts"
+
+
+def test_a_runs_base_inside_the_checkout_is_never_the_default(tmp_path: Path) -> None:
+    from progettare.mcp import resolve_runs_base
+
+    checkout = tmp_path / "checkouts" / "progettare"
+    default = resolve_runs_base(str(checkout), None)
+    assert checkout.resolve() not in default.resolve().parents
+    assert default.resolve() != checkout.resolve()

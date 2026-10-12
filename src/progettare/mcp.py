@@ -83,7 +83,17 @@ def _outcome_document(outcome: BlueprintOutcome) -> dict[str, Any]:
     return document
 
 
-def default_ceremony(ref: str, repo_path: str) -> dict[str, Any]:
+def resolve_runs_base(repo_path: str, runs_base: str | None = None) -> Path:
+    """Where run artifacts land: explicit when given, beside the checkout
+    by default, and never inside the repository the survey observes."""
+    if runs_base:
+        return Path(runs_base)
+    return Path(repo_path).resolve().parent / "runs"
+
+
+def default_ceremony(
+    ref: str, repo_path: str, runs_base: str | None = None
+) -> dict[str, Any]:
     """Run the ceremony exactly as the CLI's blueprint verb does."""
     from progettare.cli import NareSubprocessRunner
 
@@ -96,7 +106,7 @@ def default_ceremony(ref: str, repo_path: str) -> dict[str, Any]:
         issue_ref,
         str(root),
         config,
-        root / "runs",
+        resolve_runs_base(repo_path, runs_base),
         NareSubprocessRunner(),
         issue,
         written_at,
