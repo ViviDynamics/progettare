@@ -5,7 +5,9 @@ starts exactly one ceremony run; the run's outcome is posted as an issue
 comment where the card lives, with the replay artifact attached in a
 fenced JSON block. The app's login and trigger label are configuration,
 not code, and the delivery ledger is what makes redeliveries harmless.
-Deployment and App registration are the app-specific stories.
+Deployment and App registration are the app-specific stories, and the
+gh subprocess authenticates with installation tokens the app mints and
+refreshes itself.
 """
 
 from __future__ import annotations
@@ -14,6 +16,8 @@ import json
 from collections.abc import Callable, Mapping
 from http.server import HTTPServer
 from typing import Any
+
+from progettare.auth import InstallationAuth, gh_dispatch
 
 APP_LOGIN = "progettare[bot]"
 TRIGGER_LABEL = "progettare"
@@ -134,12 +138,14 @@ class WebhookConfig:
         login: str = APP_LOGIN,
         trigger_label: str = TRIGGER_LABEL,
         runs_base: str | None = None,
+        gh_auth: InstallationAuth | None = None,
     ) -> None:
         self.secret = secret
         self.repo_path = repo_path
         self.login = login
         self.trigger_label = trigger_label
         self.runs_base = runs_base
+        self.gh_auth = gh_auth
 
 
 def _signed(secret: str, body: bytes, signature: str | None) -> bool:
@@ -191,7 +197,7 @@ def webhook_response(
     if not isinstance(full_name, str) or not isinstance(number, int):
         return 200, {"status": "ignored"}
 
-    dispatch = gh_call if gh_call is not None else _post_gh
+    dispatch = gh_call if gh_call is not None else gh_dispatch(config.gh_auth)
 
     def post(comment: str) -> None:
         dispatch(
@@ -224,13 +230,6 @@ def _default_ceremony(
     return run_ceremony(ref, repo_path, runs_base)
 
 
-def _post_gh(argv: list[str]) -> None:
-    """The default gh seam: the App's token arrives in the environment."""
-    import subprocess
-
-    subprocess.run(argv, check=False)
-
-
 def build_webhook_server(
     port: int,
     config: WebhookConfig,
@@ -245,7 +244,7 @@ def build_webhook_server(
     from http.server import BaseHTTPRequestHandler
 
     ledger = DeliveryLedger()
-    dispatch = gh_call if gh_call is not None else _post_gh
+    dispatch = gh_call if gh_call is not None else gh_dispatch(config.gh_auth)
 
     class Receiver(BaseHTTPRequestHandler):
         def do_POST(self) -> None:

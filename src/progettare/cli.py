@@ -349,12 +349,20 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return EXIT_FAILED
+        gh_auth = None
+        app_id = os.environ.get("PROGETTARE_APP_ID")
+        private_key = os.environ.get("PROGETTARE_APP_PRIVATE_KEY")
+        if app_id and private_key:
+            from progettare.auth import InstallationAuth
+
+            gh_auth = InstallationAuth(app_id, private_key)
         webhook_config = WebhookConfig(
             secret,
             os.environ.get("PROGETTARE_REPO_PATH", ""),
             os.environ.get("PROGETTARE_APP_LOGIN", APP_LOGIN),
             os.environ.get("PROGETTARE_TRIGGER_LABEL", TRIGGER_LABEL),
             os.environ.get("PROGETTARE_RUNS_BASE"),
+            gh_auth,
         )
         serve_webhook(args.port, webhook_config)
         return EXIT_COMPLETE
