@@ -122,15 +122,27 @@ def test_the_real_openssl_signer_round_trips(tmp_path: Any) -> None:
     signature_path = tmp_path / "sig.bin"
     signature_path.write_bytes(signature)
     subprocess.run(
-        ["openssl", "rsa", "-in", str(tmp_path / "key.pem"), "-pubout", "-out",
-         str(tmp_path / "pub.pem")],
+        [
+            "openssl",
+            "rsa",
+            "-in",
+            str(tmp_path / "key.pem"),
+            "-pubout",
+            "-out",
+            str(tmp_path / "pub.pem"),
+        ],
         check=True,
         capture_output=True,
     )
     verified = subprocess.run(
         [
-            "openssl", "dgst", "-sha256", "-verify", str(tmp_path / "pub.pem"),
-            "-signature", str(signature_path),
+            "openssl",
+            "dgst",
+            "-sha256",
+            "-verify",
+            str(tmp_path / "pub.pem"),
+            "-signature",
+            str(signature_path),
         ],
         input=body.encode(),
         capture_output=True,
@@ -139,8 +151,13 @@ def test_the_real_openssl_signer_round_trips(tmp_path: Any) -> None:
 
     tampered = subprocess.run(
         [
-            "openssl", "dgst", "-sha256", "-verify", str(tmp_path / "pub.pem"),
-            "-signature", str(signature_path),
+            "openssl",
+            "dgst",
+            "-sha256",
+            "-verify",
+            str(tmp_path / "pub.pem"),
+            "-signature",
+            str(signature_path),
         ],
         input=b"header.payloae",
         capture_output=True,

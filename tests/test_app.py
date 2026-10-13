@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from progettare.app import DeliveryLedger, handle_event, should_trigger
 
 ASSIGNED: dict[str, Any] = {
@@ -251,6 +253,46 @@ def test_a_redelivered_delivery_starts_no_second_run() -> None:
     )
     assert code == 200
     assert response["status"] == "duplicate"
+    assert len(gh_calls) == 1
+
+
+def test_the_default_ceremony_reads_with_the_rotated_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import progettare.mcp as mcp
+    from progettare.app import WebhookConfig, webhook_response
+    from progettare.auth import InstallationAuth
+
+    body = _assigned_body()
+    captured: dict[str, Any] = {}
+
+    def fake_default_ceremony(
+        ref: Any, repo_path: Any, runs_base: Any = None, gh_token: Any = None
+    ) -> dict[str, Any]:
+        captured["gh_token"] = gh_token
+        return {"status": "complete"}
+
+    def fake_api(method: str, path: str, jwt: Any = None) -> Any:
+        if method == "GET":
+            return [{"id": 170440362}]
+        return {"token": "tok-1", "expires_at": "2030-01-01T00:00:00Z"}
+
+    gh_auth = InstallationAuth(
+        "5280026", "KEY", sign=lambda body: b"sig", api=fake_api, clock=lambda: 1000.0
+    )
+    monkeypatch.setattr(mcp, "default_ceremony", fake_default_ceremony)
+    gh_calls: list[list[str]] = []
+    code, response = webhook_response(
+        "d-rotation",
+        _signature("s", body),
+        body,
+        WebhookConfig("s", "/repo", gh_auth=gh_auth),
+        DeliveryLedger(),
+        gh_calls.append,
+    )
+    assert code == 200
+    assert response["status"] == "complete"
+    assert captured["gh_token"]() == "tok-1"
     assert len(gh_calls) == 1
 
 
