@@ -24,7 +24,7 @@ spec:
       containers:
         - name: app
           image: ghcr.io/vividynamics/progettare:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           # The webhook receiver subcommand lands with the wiring story (#35).
           command: ["progettare", "serve-webhook"]
           securityContext:
