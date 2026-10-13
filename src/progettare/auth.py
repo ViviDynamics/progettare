@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
+import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -26,12 +28,20 @@ def _b64url(payload: str | bytes) -> str:
 
 
 def _openssl_sign(body: str, private_key: str) -> bytes:
-    completed = subprocess.run(
-        ["openssl", "dgst", "-sha256", "-sign", "/dev/stdin"],
-        input=f"{body}\n{private_key}".encode(),
-        capture_output=True,
-        check=True,
-    )
+    # The body to sign arrives on stdin and the key as a file path: the two
+    # cannot share a stream, or what openssl signs is not what GitHub reads.
+    fd, key_path = tempfile.mkstemp(suffix=".pem")
+    try:
+        with os.fdopen(fd, "w") as key_file:
+            key_file.write(private_key)
+        completed = subprocess.run(
+            ["openssl", "dgst", "-sha256", "-sign", key_path],
+            input=body.encode(),
+            capture_output=True,
+            check=True,
+        )
+    finally:
+        os.unlink(key_path)
     return completed.stdout
 
 

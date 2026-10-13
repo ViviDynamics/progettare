@@ -98,3 +98,52 @@ def test_the_dispatch_hands_the_gh_subprocess_a_live_token() -> None:
     dispatch = gh_dispatch(auth, runner=runner)
     dispatch(["gh", "api", "repos/o/r/issues/7/comments"])
     assert captured["env"]["GH_TOKEN"] == "tok-1"
+
+
+def test_the_real_openssl_signer_round_trips(tmp_path: Any) -> None:
+    """The shipped signer produces a signature openssl verifies.
+
+    This test exists because the first signer passed the data and the key
+    through one unseekable stdin and every minted JWT was garbage, which
+    the injected fakes could never see.
+    """
+    import subprocess
+
+    from progettare.auth import _openssl_sign
+
+    subprocess.run(
+        ["openssl", "genrsa", "-out", str(tmp_path / "key.pem"), "2048"],
+        check=True,
+        capture_output=True,
+    )
+    private_key = (tmp_path / "key.pem").read_text()
+    body = "header.payload"
+    signature = _openssl_sign(body, private_key)
+    signature_path = tmp_path / "sig.bin"
+    signature_path.write_bytes(signature)
+    subprocess.run(
+        ["openssl", "rsa", "-in", str(tmp_path / "key.pem"), "-pubout", "-out",
+         str(tmp_path / "pub.pem")],
+        check=True,
+        capture_output=True,
+    )
+    verified = subprocess.run(
+        [
+            "openssl", "dgst", "-sha256", "-verify", str(tmp_path / "pub.pem"),
+            "-signature", str(signature_path),
+        ],
+        input=body.encode(),
+        capture_output=True,
+    )
+    assert verified.returncode == 0, verified.stderr
+
+    tampered = subprocess.run(
+        [
+            "openssl", "dgst", "-sha256", "-verify", str(tmp_path / "pub.pem"),
+            "-signature", str(signature_path),
+        ],
+        input=b"header.payloae",
+        capture_output=True,
+    )
+    assert tampered.returncode != 0
+    assert signature_path.stat().st_size == 256
