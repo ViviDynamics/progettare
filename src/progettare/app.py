@@ -18,6 +18,8 @@ from http.server import HTTPServer
 from typing import Any
 
 from progettare.auth import InstallationAuth, gh_dispatch
+from progettare.checkout import CheckoutRefreshError, refresh_checkout
+from progettare.issue_ref import parse_issue_ref
 
 APP_LOGIN = "progettare[bot]"
 TRIGGER_LABEL = "progettare"
@@ -229,6 +231,16 @@ def _default_ceremony(
     runs_base: str | None = None,
     gh_token: Callable[[], str] | None = None,
 ) -> dict[str, Any]:
+    if gh_token is not None:
+        try:
+            refresh_checkout(repo_path, parse_issue_ref(ref).repository(), gh_token)
+        except CheckoutRefreshError as error:
+            return {
+                "status": "failed",
+                "run_dir": "",
+                "failing_stage": "checkout_refresh",
+                "detail": str(error),
+            }
     from progettare.mcp import default_ceremony as run_ceremony
 
     return run_ceremony(ref, repo_path, runs_base, gh_token)
