@@ -92,7 +92,10 @@ def resolve_runs_base(repo_path: str, runs_base: str | None = None) -> Path:
 
 
 def default_ceremony(
-    ref: str, repo_path: str, runs_base: str | None = None
+    ref: str,
+    repo_path: str,
+    runs_base: str | None = None,
+    gh_token: Callable[[], str] | None = None,
 ) -> dict[str, Any]:
     """Run the ceremony exactly as the CLI's blueprint verb does."""
     from progettare.cli import NareSubprocessRunner
@@ -101,7 +104,7 @@ def default_ceremony(
     issue_ref = parse_issue_ref(ref)
     root = Path(repo_path)
     config = load_config(root / "progettare.yaml")
-    issue = load_issue(issue_ref)
+    issue = load_issue(issue_ref, gh_token=gh_token)
     outcome = run_blueprint(
         issue_ref,
         str(root),
@@ -110,7 +113,7 @@ def default_ceremony(
         NareSubprocessRunner(),
         issue,
         written_at,
-        lambda: ensure_issue_open(issue_ref),
+        lambda: ensure_issue_open(issue_ref, gh_token=gh_token),
     )
     return _outcome_document(outcome)
 

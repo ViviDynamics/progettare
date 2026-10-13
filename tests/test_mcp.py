@@ -7,6 +7,8 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from progettare.contract import ARTIFACT_VERSION, PROGETTARE_VERSION
 from progettare.mcp import PROTOCOL_VERSION, TOOL_NAME, handle_message
 
@@ -156,3 +158,75 @@ def test_a_runs_base_inside_the_checkout_is_never_the_default(tmp_path: Path) ->
     default = resolve_runs_base(str(checkout), None)
     assert checkout.resolve() not in default.resolve().parents
     assert default.resolve() != checkout.resolve()
+
+
+def test_the_ceremony_threads_the_rotated_token_through_its_reads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import progettare.mcp as mcp
+    from progettare.github import Issue
+
+    seen: dict[str, Any] = {}
+
+    def fake_load_issue(ref: Any, gh_token: Any = None, **_: Any) -> Issue:
+        seen["load_issue"] = gh_token
+        return Issue(
+            owner="o",
+            repo="r",
+            number=7,
+            title="t",
+            body="b",
+            state="OPEN",
+            url="https://github.com/o/r/issues/7",
+            comments=(),
+        )
+
+    def fake_ensure(ref: Any, gh_token: Any = None, **__: Any) -> None:
+        seen["ensure"] = gh_token
+
+    def fake_run_blueprint(*args: Any, **kwargs: Any) -> None:
+        ensure = args[7]
+        if callable(ensure):
+            ensure()
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(mcp, "load_config", lambda _: object())
+    monkeypatch.setattr(mcp, "load_issue", fake_load_issue)
+    monkeypatch.setattr(mcp, "ensure_issue_open", fake_ensure)
+    monkeypatch.setattr(mcp, "run_blueprint", fake_run_blueprint)
+    with pytest.raises(RuntimeError, match="stop here"):
+        mcp.default_ceremony("o/r#7", "/repo", None, lambda: "tok-rotated")
+    assert seen["load_issue"]() == "tok-rotated"
+    assert seen["ensure"]() == "tok-rotated"
+
+
+def test_a_ceremony_without_a_rotated_token_passes_none_through(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import progettare.mcp as mcp
+    from progettare.github import Issue
+
+    seen: dict[str, Any] = {}
+
+    def fake_load_issue(ref: Any, gh_token: Any = None, **__: Any) -> Issue:
+        seen["gh_token"] = gh_token
+        return Issue(
+            owner="o",
+            repo="r",
+            number=7,
+            title="t",
+            body="b",
+            state="OPEN",
+            url="https://github.com/o/r/issues/7",
+            comments=(),
+        )
+
+    def fake_run_blueprint(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(mcp, "load_config", lambda _: object())
+    monkeypatch.setattr(mcp, "load_issue", fake_load_issue)
+    monkeypatch.setattr(mcp, "run_blueprint", fake_run_blueprint)
+    with pytest.raises(RuntimeError, match="stop here"):
+        mcp.default_ceremony("o/r#7", "/repo", None)
+    assert seen["gh_token"] is None
