@@ -317,6 +317,14 @@ def _header_lines(intake: dict[str, Any]) -> list[str]:
                 f"- Q: {item.get('question', '')} A: {item.get('answer', '')}"
                 for item in asked
             )
+    conversation = intake.get("conversation")
+    if isinstance(conversation, list):
+        voiced = [item for item in conversation if isinstance(item, dict)]
+        if voiced:
+            lines.append("Conversation:")
+            lines.extend(
+                f"- {item.get('author', '')}: {item.get('body', '')}" for item in voiced
+            )
     blocked = _string_items(intake.get("blocked_questions"))
     if blocked:
         lines.append("Blocked questions:")
