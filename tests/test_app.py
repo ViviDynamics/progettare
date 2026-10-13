@@ -259,6 +259,7 @@ def test_a_redelivered_delivery_starts_no_second_run() -> None:
 def test_the_default_ceremony_reads_with_the_rotated_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import progettare.app as app_module
     import progettare.mcp as mcp
     from progettare.app import WebhookConfig, webhook_response
     from progettare.auth import InstallationAuth
@@ -280,6 +281,7 @@ def test_the_default_ceremony_reads_with_the_rotated_token(
     gh_auth = InstallationAuth(
         "5280026", "KEY", sign=lambda body: b"sig", api=fake_api, clock=lambda: 1000.0
     )
+    monkeypatch.setattr(app_module, "refresh_checkout", lambda *args: None)
     monkeypatch.setattr(mcp, "default_ceremony", fake_default_ceremony)
     gh_calls: list[list[str]] = []
     code, response = webhook_response(
@@ -294,6 +296,78 @@ def test_the_default_ceremony_reads_with_the_rotated_token(
     assert response["status"] == "complete"
     assert captured["gh_token"]() == "tok-1"
     assert len(gh_calls) == 1
+
+
+def test_the_default_ceremony_refreshes_the_checkout_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import progettare.app as app_module
+    import progettare.mcp as mcp
+
+    calls: list[str] = []
+
+    def fake_refresh(repo_path: Any, repository: Any, token: Any) -> None:
+        calls.append(f"refresh:{repo_path}:{repository}:{token()}")
+
+    def fake_ceremony(
+        ref: Any, repo_path: Any, runs_base: Any = None, gh_token: Any = None
+    ) -> dict[str, Any]:
+        calls.append("ceremony")
+        return {"status": "complete"}
+
+    monkeypatch.setattr(app_module, "refresh_checkout", fake_refresh)
+    monkeypatch.setattr(mcp, "default_ceremony", fake_ceremony)
+    outcome = app_module._default_ceremony("o/r#7", "/repo", None, lambda: "tok-1")
+    assert calls == ["refresh:/repo:o/r:tok-1", "ceremony"]
+    assert outcome["status"] == "complete"
+
+
+def test_a_failed_refresh_fails_the_ceremony_loudly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import progettare.app as app_module
+    import progettare.mcp as mcp
+    from progettare.checkout import CheckoutRefreshError
+
+    def fake_refresh(repo_path: Any, repository: Any, token: Any) -> None:
+        raise CheckoutRefreshError("git fetch exited 1: fatal: nope")
+
+    def dead_ceremony(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("the ceremony must not run")
+
+    monkeypatch.setattr(app_module, "refresh_checkout", fake_refresh)
+    monkeypatch.setattr(mcp, "default_ceremony", dead_ceremony)
+    outcome = app_module._default_ceremony("o/r#7", "/repo", None, lambda: "tok-1")
+    assert outcome == {
+        "status": "failed",
+        "run_dir": "",
+        "failing_stage": "checkout_refresh",
+        "detail": "git fetch exited 1: fatal: nope",
+    }
+
+
+def test_without_a_token_provider_no_refresh_happens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import progettare.app as app_module
+    import progettare.mcp as mcp
+
+    calls: list[str] = []
+
+    def dead_refresh(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("no refresh without a token provider")
+
+    def fake_ceremony(
+        ref: Any, repo_path: Any, runs_base: Any = None, gh_token: Any = None
+    ) -> dict[str, Any]:
+        calls.append(f"ceremony:{gh_token}")
+        return {"status": "complete"}
+
+    monkeypatch.setattr(app_module, "refresh_checkout", dead_refresh)
+    monkeypatch.setattr(mcp, "default_ceremony", fake_ceremony)
+    outcome = app_module._default_ceremony("o/r#7", "/repo", None, None)
+    assert calls == ["ceremony:None"]
+    assert outcome["status"] == "complete"
 
 
 def test_an_unrelated_event_is_ignored() -> None:
