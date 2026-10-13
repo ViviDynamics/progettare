@@ -108,7 +108,9 @@ class Conflict:
 class CardContext:
     """What the survey and blueprint stages consume. Survey and blueprint
     read the criteria and clarifications as data; nothing downstream parses
-    the issue body again."""
+    the issue body again. The conversation, when the run is a revision
+    round, is the thread the humans wrote; it is context for the
+    strategy, never criteria."""
 
     issue: Issue
     repo_path: str
@@ -116,6 +118,7 @@ class CardContext:
     clarifications: tuple[Clarification, ...]
     status: str
     blocked_questions: tuple[str, ...]
+    conversation: tuple[IssueComment, ...] = ()
 
 
 def _normalize_criterion(text: str) -> str:
@@ -275,13 +278,17 @@ def _validate_repo_path(repo_path: str) -> Path:
     return path.resolve()
 
 
-def assemble(issue: Issue, repo_path: str) -> CardContext:
+def assemble(
+    issue: Issue, repo_path: str, thread: tuple[IssueComment, ...] = ()
+) -> CardContext:
     """The card context, or `blocked` with the questions that unblock it.
 
     Blocked is an outcome, not an error: no model call is spent, and the
     run directory records why the run stopped here. A placeholder among
     otherwise actionable criteria blocks just as an empty section does:
-    the survey must not plan around a requirement nobody wrote.
+    the survey must not plan around a requirement nobody wrote. The
+    thread, when given, is the conversation a revision round reads; it
+    never changes the criteria.
     """
     resolved = _validate_repo_path(repo_path)
     positioned = _parse_section(issue.body)
@@ -320,4 +327,5 @@ def assemble(issue: Issue, repo_path: str) -> CardContext:
         clarifications=pair_clarifications(issue.comments),
         status=status,
         blocked_questions=tuple(questions),
+        conversation=thread,
     )

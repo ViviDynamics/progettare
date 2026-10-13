@@ -72,11 +72,13 @@ def _error(id: Any, code: int, message: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}
 
 
-def _outcome_document(outcome: BlueprintOutcome) -> dict[str, Any]:
+def _outcome_document(outcome: BlueprintOutcome, revision: int = 0) -> dict[str, Any]:
     document: dict[str, Any] = {
         "status": outcome.status,
         "run_dir": str(outcome.run_dir),
     }
+    if revision:
+        document["revision"] = revision
     if outcome.status != "complete":
         document["failing_stage"] = outcome.failing_stage
         document["detail"] = outcome.detail
@@ -96,8 +98,15 @@ def default_ceremony(
     repo_path: str,
     runs_base: str | None = None,
     gh_token: Callable[[], str] | None = None,
+    include_thread: bool = False,
+    revision: int = 0,
 ) -> dict[str, Any]:
-    """Run the ceremony exactly as the CLI's blueprint verb does."""
+    """Run the ceremony exactly as the CLI's blueprint verb does.
+
+    A comment-triggered round (revision > 0) hands the conversation
+    thread to the intake, so the strategy accounts for what the humans
+    said; the criteria still come from the body alone.
+    """
     from progettare.cli import NareSubprocessRunner
 
     written_at = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -114,8 +123,9 @@ def default_ceremony(
         issue,
         written_at,
         lambda: ensure_issue_open(issue_ref, gh_token=gh_token),
+        thread=issue.comments if include_thread else (),
     )
-    return _outcome_document(outcome)
+    return _outcome_document(outcome, revision)
 
 
 def handle_message(

@@ -90,7 +90,7 @@ def test_a_closed_issue_never_triggers() -> None:
 def test_one_run_per_trigger_event() -> None:
     calls: list[tuple[str, str]] = []
 
-    def ceremony(ref: str, repo_path: str) -> dict[str, Any]:
+    def ceremony(ref: str, repo_path: str, revision: int = 0) -> dict[str, Any]:
         calls.append((ref, repo_path))
         return dict(OUTCOME)
 
@@ -127,7 +127,7 @@ def test_the_comment_carries_the_replay_artifact() -> None:
         "delivery-2",
         "labeled",
         labeled(),
-        lambda ref, repo: dict(OUTCOME),
+        lambda ref, repo, revision: dict(OUTCOME),
         DeliveryLedger(),
         lambda body: posted.append(body),
         "/repo",
@@ -149,7 +149,7 @@ def test_a_blocked_outcome_posts_the_questions() -> None:
         "delivery-3",
         "assigned",
         ASSIGNED,
-        lambda ref, repo: outcome,
+        lambda ref, repo, revision: outcome,
         DeliveryLedger(),
         lambda body: posted.append(body),
         "/repo",
@@ -216,7 +216,7 @@ def test_a_verified_trigger_event_runs_and_posts_one_comment() -> None:
         WebhookConfig("s", "/repo"),
         DeliveryLedger(),
         gh_calls.append,
-        lambda ref, repo: {"status": "complete", "issue": ref},
+        lambda ref, repo, revision: {"status": "complete", "issue": ref},
     )
     assert code == 200
     assert response["status"] == "complete"
@@ -240,7 +240,7 @@ def test_a_redelivered_delivery_starts_no_second_run() -> None:
         WebhookConfig("s", "/repo"),
         ledger,
         gh_calls.append,
-        lambda ref, repo: {"status": "complete", "issue": ref},
+        lambda ref, repo, revision: {"status": "complete", "issue": ref},
     )
     code, response = webhook_response(
         "d3",
@@ -249,7 +249,7 @@ def test_a_redelivered_delivery_starts_no_second_run() -> None:
         WebhookConfig("s", "/repo"),
         ledger,
         gh_calls.append,
-        lambda ref, repo: {"status": "complete", "issue": ref},
+        lambda ref, repo, revision: {"status": "complete", "issue": ref},
     )
     assert code == 200
     assert response["status"] == "duplicate"
@@ -268,7 +268,12 @@ def test_the_default_ceremony_reads_with_the_rotated_token(
     captured: dict[str, Any] = {}
 
     def fake_default_ceremony(
-        ref: Any, repo_path: Any, runs_base: Any = None, gh_token: Any = None
+        ref: Any,
+        repo_path: Any,
+        runs_base: Any = None,
+        gh_token: Any = None,
+        include_thread: bool = False,
+        revision: int = 0,
     ) -> dict[str, Any]:
         captured["gh_token"] = gh_token
         return {"status": "complete"}
@@ -310,7 +315,12 @@ def test_the_default_ceremony_refreshes_the_checkout_first(
         calls.append(f"refresh:{repo_path}:{repository}:{token()}")
 
     def fake_ceremony(
-        ref: Any, repo_path: Any, runs_base: Any = None, gh_token: Any = None
+        ref: Any,
+        repo_path: Any,
+        runs_base: Any = None,
+        gh_token: Any = None,
+        include_thread: bool = False,
+        revision: int = 0,
     ) -> dict[str, Any]:
         calls.append("ceremony")
         return {"status": "complete"}
@@ -358,7 +368,12 @@ def test_without_a_token_provider_no_refresh_happens(
         raise AssertionError("no refresh without a token provider")
 
     def fake_ceremony(
-        ref: Any, repo_path: Any, runs_base: Any = None, gh_token: Any = None
+        ref: Any,
+        repo_path: Any,
+        runs_base: Any = None,
+        gh_token: Any = None,
+        include_thread: bool = False,
+        revision: int = 0,
     ) -> dict[str, Any]:
         calls.append(f"ceremony:{gh_token}")
         return {"status": "complete"}
@@ -401,7 +416,7 @@ def test_the_receiver_serves_signed_deliveries_over_http() -> None:
         0,
         WebhookConfig("s", "/repo"),
         gh_calls.append,
-        lambda ref, repo: {"status": "complete", "issue": ref},
+        lambda ref, repo, revision: {"status": "complete", "issue": ref},
     )
     threading.Thread(target=server.serve_forever, daemon=True).start()
     connection = http.client.HTTPConnection("127.0.0.1", server.server_address[1])

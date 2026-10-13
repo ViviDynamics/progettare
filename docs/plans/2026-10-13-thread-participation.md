@@ -22,13 +22,13 @@ strategy — with progettare as a participant.
   revision)`: 0 for assignment/labeling, the round number for comment
   rounds. The revision flows into the outcome document and the
   comment lead.
-- The ceremony reads the thread itself through the existing gh seam
-  (`load_comments` beside `load_issue`), so the receiver needs no
-  capturing gh seam. The thread enters at intake: `assemble` gains the
-  conversation, `CardContext` carries it into the run artifacts, and
-  `plan_for` adds a "conversation so far" section to the survey plan.
-  The acceptance criteria still come from the body alone — the thread
-  is context, not criteria.
+- The ceremony reads the thread through the issue it already loads
+  (`load_issue` fetches comments beside the body), so the receiver
+  needs no capturing gh seam. The thread enters at intake:
+  `assemble` gains the conversation, `CardContext` carries it into the
+  intake artifact, and the blueprint prompt renders a "Conversation"
+  section. The acceptance criteria still come from the body alone —
+  the thread is context, not criteria.
 - The outcome document gains a `revision` field; the comment lead says
   "revision N" when N > 0, so a thread shows its rounds at a glance.
 

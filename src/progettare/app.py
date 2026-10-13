@@ -3,11 +3,12 @@
 An issue assigned to the app's login, or labeled with the trigger label,
 starts exactly one ceremony run; the run's outcome is posted as an issue
 comment where the card lives, with the replay artifact attached in a
-fenced JSON block. The app's login and trigger label are configuration,
-not code, and the delivery ledger is what makes redeliveries harmless.
-Deployment and App registration are the app-specific stories, and the
-gh subprocess authenticates with installation tokens the app mints and
-refreshes itself.
+fenced JSON block. A comment by an authorized reviewer that addresses
+the bot starts a revision round: the ceremony reads the thread and its
+outcome names the round. The app's login and trigger label are
+configuration, not code, and the delivery ledger is what makes
+redeliveries harmless and the conversation bounded. Deployment and App
+registration are the app-specific stories.
 """
 
 from __future__ import annotations
@@ -31,17 +32,63 @@ class DeliveryLedger:
     The ledger records the delivery before the run starts, so a
     redelivery that arrives while the run is still going finds it here
     and starts nothing. A persistent ledger is the deployment story's
-    business; this one is the process-local truth.
+    business; this one is the process-local truth. It also counts the
+    revision rounds per issue, so the conversation is bounded.
     """
 
     def __init__(self) -> None:
         self._seen: set[str] = set()
+        self._rounds: dict[int, int] = {}
 
     def seen(self, delivery_id: str) -> bool:
         return delivery_id in self._seen
 
     def record(self, delivery_id: str) -> None:
         self._seen.add(delivery_id)
+
+    def rounds(self, issue_number: int) -> int:
+        return self._rounds.get(issue_number, 0)
+
+    def record_round(self, issue_number: int) -> None:
+        self._rounds[issue_number] = self.rounds(issue_number) + 1
+
+
+def comment_should_trigger(
+    event: Mapping[str, Any],
+    action: str,
+    login: str = APP_LOGIN,
+    reviewers: frozenset[str] | None = None,
+) -> bool:
+    """Whether this comment event asks the app to revise its strategy:
+    a comment by an authorized reviewer that addresses the bot, on an
+    open issue. The bot's own comments never qualify, so the thread
+    cannot loop on itself."""
+    if action != "created":
+        return False
+    comment = event.get("comment")
+    if not isinstance(comment, dict):
+        return False
+    author = comment.get("user")
+    author_login = author.get("login") if isinstance(author, dict) else None
+    if author_login == login:
+        return False
+    if reviewers is not None:
+        if author_login not in reviewers:
+            return False
+    else:
+        repository = event.get("repository")
+        owner = (
+            repository.get("owner", {}).get("login")
+            if isinstance(repository, dict)
+            else None
+        )
+        if author_login != owner:
+            return False
+    body = comment.get("body")
+    if not isinstance(body, str) or f"@{login}" not in body:
+        return False
+    issue = event.get("issue")
+    return isinstance(issue, dict) and issue.get("state") == "open"
 
 
 def should_trigger(
@@ -74,6 +121,9 @@ def should_trigger(
 def _lead(outcome: Mapping[str, Any]) -> str:
     status = outcome.get("status")
     if status == "complete":
+        revision = outcome.get("revision", 0)
+        if isinstance(revision, int) and revision > 0:
+            return f"progettare's revised strategy (revision {revision}):"
         return "progettare completed the blueprint:"
     stage = outcome.get("failing_stage", "unknown")
     return f"progettare {status} at {stage}:"
@@ -97,31 +147,49 @@ def comment_body(outcome: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+CAP_NOTE = (
+    "Revision rounds for this issue are exhausted. Edit the issue body "
+    "and re-trigger if the task definition itself changed."
+)
+
+
 def handle_event(
     delivery_id: str,
     action: str,
     event: Mapping[str, Any],
-    ceremony: Callable[[str, str], dict[str, Any]],
+    ceremony: Callable[..., dict[str, Any]],
     ledger: DeliveryLedger,
     poster: Callable[[str], None],
     repo_path: str,
+    max_rounds: int = 2,
 ) -> dict[str, Any]:
     """One delivery in, at most one run out.
 
     The delivery is recorded before anything else, so a redelivery
     finds it here and starts nothing; the ceremony's outcome document
-    is posted where the card lives. The repo path is the app's
-    configuration: a webhook names no local filesystem.
+    is posted where the card lives. A comment event is a revision
+    round: the ceremony receives the round number, and the conversation
+    is bounded by max_rounds. The repo path is the app's configuration:
+    a webhook names no local filesystem.
     """
     if ledger.seen(delivery_id):
         return {"status": "duplicate"}
-    ledger.record(delivery_id)
     repository = event.get("repository")
     full_name = repository.get("full_name") if isinstance(repository, dict) else None
     if not isinstance(full_name, str) or not full_name:
         return {"status": "skipped", "reason": "the event carries no repository"}
-    ref = f"{full_name}#{event['issue']['number']}"
-    outcome = ceremony(ref, repo_path)
+    number = event["issue"]["number"]
+    revision = 0
+    if action == "created":
+        revision = ledger.rounds(number) + 1
+        if revision > max_rounds:
+            ledger.record(delivery_id)
+            poster(CAP_NOTE)
+            return {"status": "capped"}
+        ledger.record_round(number)
+    ledger.record(delivery_id)
+    ref = f"{full_name}#{number}"
+    outcome = ceremony(ref, repo_path, revision)
     poster(comment_body(outcome))
     return {"status": str(outcome.get("status"))}
 
@@ -141,6 +209,8 @@ class WebhookConfig:
         trigger_label: str = TRIGGER_LABEL,
         runs_base: str | None = None,
         gh_auth: InstallationAuth | None = None,
+        reviewers: frozenset[str] | None = None,
+        max_rounds: int = 2,
     ) -> None:
         self.secret = secret
         self.repo_path = repo_path
@@ -148,6 +218,8 @@ class WebhookConfig:
         self.trigger_label = trigger_label
         self.runs_base = runs_base
         self.gh_auth = gh_auth
+        self.reviewers = reviewers
+        self.max_rounds = max_rounds
 
 
 def _signed(secret: str, body: bytes, signature: str | None) -> bool:
@@ -167,7 +239,7 @@ def webhook_response(
     config: WebhookConfig,
     ledger: DeliveryLedger,
     gh_call: Callable[[list[str]], None] | None = None,
-    ceremony: Callable[[str, str], dict[str, Any]] | None = None,
+    ceremony: Callable[..., dict[str, Any]] | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """One webhook delivery in, an HTTP status and a status document out.
 
@@ -188,7 +260,12 @@ def webhook_response(
         return 400, {"status": "refused", "reason": "the payload is not an object"}
     raw_action = payload.get("action")
     action = raw_action if isinstance(raw_action, str) else ""
-    if not should_trigger(
+    if isinstance(payload.get("comment"), dict) or action == "created":
+        if not comment_should_trigger(
+            payload, action, login=config.login, reviewers=config.reviewers
+        ):
+            return 200, {"status": "ignored"}
+    elif not should_trigger(
         payload, action, login=config.login, label=config.trigger_label
     ):
         return 200, {"status": "ignored"}
@@ -212,15 +289,30 @@ def webhook_response(
             ]
         )
 
-    run_ceremony = ceremony if ceremony is not None else None
-    if run_ceremony is None:
+    if ceremony is not None:
+        run_ceremony: Callable[..., dict[str, Any]] = ceremony
+    else:
         gh_token = config.gh_auth.token if config.gh_auth is not None else None
 
-        def run_ceremony(ref: str, repo_path: str) -> dict[str, Any]:
-            return _default_ceremony(ref, repo_path, config.runs_base, gh_token)
+        def run_ceremony(ref: str, repo_path: str, revision: int) -> dict[str, Any]:
+            return _default_ceremony(
+                ref,
+                repo_path,
+                config.runs_base,
+                gh_token,
+                include_thread=revision > 0,
+                revision=revision,
+            )
 
     outcome = handle_event(
-        delivery_id, action, payload, run_ceremony, ledger, post, config.repo_path
+        delivery_id,
+        action,
+        payload,
+        run_ceremony,
+        ledger,
+        post,
+        config.repo_path,
+        max_rounds=config.max_rounds,
     )
     return 200, outcome
 
@@ -230,6 +322,8 @@ def _default_ceremony(
     repo_path: str,
     runs_base: str | None = None,
     gh_token: Callable[[], str] | None = None,
+    include_thread: bool = False,
+    revision: int = 0,
 ) -> dict[str, Any]:
     if gh_token is not None:
         try:
@@ -243,14 +337,14 @@ def _default_ceremony(
             }
     from progettare.mcp import default_ceremony as run_ceremony
 
-    return run_ceremony(ref, repo_path, runs_base, gh_token)
+    return run_ceremony(ref, repo_path, runs_base, gh_token, include_thread, revision)
 
 
 def build_webhook_server(
     port: int,
     config: WebhookConfig,
     gh_call: Callable[[list[str]], None] | None = None,
-    ceremony: Callable[[str, str], dict[str, Any]] | None = None,
+    ceremony: Callable[..., dict[str, Any]] | None = None,
 ) -> HTTPServer:
     """The receiver's HTTP shell around the dispatch seam.
 
