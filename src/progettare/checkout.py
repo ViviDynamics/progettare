@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 
@@ -30,26 +31,26 @@ def refresh_checkout(
     checkout cloned under one ephemeral token still refreshes under every
     token the app mints after that one expires.
     """
-    if _has_git_dir(repo_path):
+    if Path(repo_path, ".git").exists():
         _run(
             runner,
             ["git", "-C", repo_path, "fetch", _authed(repository, token()), "main"],
             "fetch",
+            token(),
         )
         _run(runner, ["git", "-C", repo_path, "reset", "--hard", "FETCH_HEAD"], "reset")
         return
-    _run(runner, ["git", "clone", _authed(repository, token()), repo_path], "clone")
+    _run(
+        runner,
+        ["git", "clone", _authed(repository, token()), repo_path],
+        "clone",
+        token(),
+    )
     _run(
         runner,
         ["git", "-C", repo_path, "remote", "set-url", "origin", _plain(repository)],
         "set-url",
     )
-
-
-def _has_git_dir(repo_path: str) -> bool:
-    from pathlib import Path
-
-    return Path(repo_path, ".git").exists()
 
 
 def _authed(repository: str, token: str) -> str:
@@ -60,10 +61,15 @@ def _plain(repository: str) -> str:
     return f"https://github.com/{repository}.git"
 
 
-def _run(runner: Callable[..., Any], argv: list[str], verb: str) -> None:
+def _run(
+    runner: Callable[..., Any], argv: list[str], verb: str, secret: str | None = None
+) -> None:
     completed = runner(argv, check=False, capture_output=True, text=True)
     if completed.returncode != 0:
-        stderr = (completed.stderr or "").strip()
+        # Git echoes the URL it was handed on transport errors, and the URL
+        # carries the token: the detail lands in a posted comment, so the
+        # token must never ride along with it.
+        stderr = (completed.stderr or "").strip().replace(secret or "", "<redacted>")
         raise CheckoutRefreshError(
             f"git {verb} exited {completed.returncode}: {stderr}"
         )

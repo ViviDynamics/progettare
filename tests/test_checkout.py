@@ -20,9 +20,13 @@ class RecordingGit:
     def __call__(self, argv: list[str], **_kwargs: Any) -> Any:
         self.calls.append(argv)
         failed = self.fail_keyword is not None and self.fail_keyword in argv
-        return subprocess.CompletedProcess(
-            argv, 1 if failed else 0, stderr="fatal: nope\n" if failed else ""
-        )
+        if failed:
+            # Real git echoes the URL it was handed on transport errors, and
+            # the URL carries the token.
+            stderr = f"fatal: unable to access {' '.join(argv)}\n"
+        else:
+            stderr = ""
+        return subprocess.CompletedProcess(argv, 1 if failed else 0, stderr=stderr)
 
 
 def test_an_existing_checkout_fetches_and_resets(tmp_path: Any) -> None:
@@ -73,8 +77,16 @@ def test_a_failed_fetch_fails_loudly_and_stops(tmp_path: Any) -> None:
     with pytest.raises(CheckoutRefreshError) as raised:
         refresh_checkout(str(tmp_path), "o/r", lambda: "tok-1", runner=git)
     assert "git fetch exited 1" in str(raised.value)
-    assert "fatal: nope" in str(raised.value)
     assert len(git.calls) == 1
+
+
+def test_a_failed_fetch_never_leaks_the_token(tmp_path: Any) -> None:
+    (tmp_path / ".git").mkdir()
+    git = RecordingGit(fail_keyword="fetch")
+    with pytest.raises(CheckoutRefreshError) as raised:
+        refresh_checkout(str(tmp_path), "o/r", lambda: "tok-1", runner=git)
+    assert "tok-1" not in str(raised.value)
+    assert "<redacted>" in str(raised.value)
 
 
 def test_a_failed_clone_fails_loudly_and_stops(tmp_path: Any) -> None:
