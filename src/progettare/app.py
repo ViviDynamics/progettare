@@ -212,9 +212,10 @@ def webhook_response(
 
     run_ceremony = ceremony if ceremony is not None else None
     if run_ceremony is None:
+        gh_token = config.gh_auth.token if config.gh_auth is not None else None
 
         def run_ceremony(ref: str, repo_path: str) -> dict[str, Any]:
-            return _default_ceremony(ref, repo_path, config.runs_base)
+            return _default_ceremony(ref, repo_path, config.runs_base, gh_token)
 
     outcome = handle_event(
         delivery_id, action, payload, run_ceremony, ledger, post, config.repo_path
@@ -223,11 +224,14 @@ def webhook_response(
 
 
 def _default_ceremony(
-    ref: str, repo_path: str, runs_base: str | None = None
+    ref: str,
+    repo_path: str,
+    runs_base: str | None = None,
+    gh_token: Callable[[], str] | None = None,
 ) -> dict[str, Any]:
     from progettare.mcp import default_ceremony as run_ceremony
 
-    return run_ceremony(ref, repo_path, runs_base)
+    return run_ceremony(ref, repo_path, runs_base, gh_token)
 
 
 def build_webhook_server(

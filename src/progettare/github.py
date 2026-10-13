@@ -1,14 +1,18 @@
 """Reading an issue from GitHub, through gh, read-only.
 
 progettare shells out to `gh`, the same way it shells out to nare: the CLI
-stays the surface, no SDK dependency arrives, and authentication is the
-caller's GH_TOKEN. Nothing in this module writes anywhere.
+stays the surface and no SDK dependency arrives. Authentication is the
+caller's GH_TOKEN, or a minted installation token handed in as `gh_token`
+so a ceremony inside the receiver outlives the deployment's static one.
+Nothing in this module writes anywhere.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -103,7 +107,9 @@ def parse_issue_payload(ref: IssueRef, payload: Any) -> Issue:
     )
 
 
-def load_issue(ref: IssueRef, gh_path: str = "gh") -> Issue:
+def load_issue(
+    ref: IssueRef, gh_path: str = "gh", gh_token: Callable[[], str] | None = None
+) -> Issue:
     """Fetch one issue read-only, or fail loudly.
 
     A closed issue is not an error in the fetch sense, but a terminal run
@@ -120,6 +126,7 @@ def load_issue(ref: IssueRef, gh_path: str = "gh") -> Issue:
         "--json",
         GH_FIELDS,
     ]
+    env = {**os.environ, "GH_TOKEN": gh_token()} if gh_token is not None else None
     try:
         completed = subprocess.run(
             command,
@@ -128,6 +135,7 @@ def load_issue(ref: IssueRef, gh_path: str = "gh") -> Issue:
             encoding="utf-8",
             timeout=GH_TIMEOUT_SECONDS,
             check=False,
+            env=env,
         )
     except FileNotFoundError as exc:
         raise IssueFetchError(
@@ -157,11 +165,13 @@ def load_issue(ref: IssueRef, gh_path: str = "gh") -> Issue:
     return issue
 
 
-def ensure_issue_open(ref: IssueRef, gh_path: str = "gh") -> None:
+def ensure_issue_open(
+    ref: IssueRef, gh_path: str = "gh", gh_token: Callable[[], str] | None = None
+) -> None:
     """Reload the issue's state, and abort when it closed mid-run.
 
     The engine calls this before each stage publishes, so a run whose
     issue closed under it aborts, discards state, and posts nothing,
     exactly as the spec's failure paths require.
     """
-    load_issue(ref, gh_path)
+    load_issue(ref, gh_path, gh_token)

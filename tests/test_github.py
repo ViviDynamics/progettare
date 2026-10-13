@@ -200,3 +200,40 @@ def test_a_number_mismatch_is_refused(
     install_gh(monkeypatch, tmp_path, gh_cat(str(payload)))
     with pytest.raises(IssueFetchError, match="when asked for #1"):
         load_issue(REF)
+
+
+def install_token_recording_gh(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, seen: Path
+) -> None:
+    payload = tmp_path / "issue.json"
+    payload.write_text(canned_issue(1))
+    script = f"#!/bin/sh\nprintf '%s' \"$GH_TOKEN\" > {seen}\ncat '{payload}'\n"
+    install_gh(monkeypatch, tmp_path, script)
+
+
+def test_load_issue_hands_gh_a_rotated_token(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen = tmp_path / "seen-token"
+    install_token_recording_gh(monkeypatch, tmp_path, seen)
+    load_issue(REF, gh_token=lambda: "tok-rotated")
+    assert seen.read_text() == "tok-rotated"
+
+
+def test_load_issue_without_a_token_keeps_the_callers_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen = tmp_path / "seen-token"
+    install_token_recording_gh(monkeypatch, tmp_path, seen)
+    monkeypatch.setenv("GH_TOKEN", "ambient")
+    load_issue(REF)
+    assert seen.read_text() == "ambient"
+
+
+def test_the_state_recheck_hands_gh_a_rotated_token(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen = tmp_path / "seen-token"
+    install_token_recording_gh(monkeypatch, tmp_path, seen)
+    ensure_issue_open(REF, gh_token=lambda: "tok-rotated")
+    assert seen.read_text() == "tok-rotated"
