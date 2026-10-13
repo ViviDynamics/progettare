@@ -46,29 +46,58 @@ def test_an_existing_checkout_fetches_and_resets(tmp_path: Any) -> None:
     ]
 
 
-def test_a_missing_checkout_is_cloned_and_the_token_is_stripped(
+def test_a_missing_checkout_boots_by_fetch_and_strips_the_token(
     tmp_path: Any,
 ) -> None:
     repo_path = str(tmp_path / "progettare")
     git = RecordingGit()
     refresh_checkout(repo_path, "o/r", lambda: "tok-1", runner=git)
     assert git.calls == [
+        ["git", "init", repo_path],
         [
             "git",
-            "clone",
-            "https://x-access-token:tok-1@github.com/o/r.git",
+            "-C",
             repo_path,
+            "fetch",
+            "https://x-access-token:tok-1@github.com/o/r.git",
+            "main",
         ],
+        ["git", "-C", repo_path, "reset", "--hard", "FETCH_HEAD"],
         [
             "git",
             "-C",
             repo_path,
             "remote",
-            "set-url",
+            "add",
             "origin",
             "https://github.com/o/r.git",
         ],
     ]
+
+
+def test_the_cold_start_carries_the_token_only_in_the_fetch(
+    tmp_path: Any,
+) -> None:
+    git = RecordingGit()
+    refresh_checkout(str(tmp_path / "progettare"), "o/r", lambda: "tok-1", runner=git)
+    for argv in git.calls:
+        if "fetch" in argv:
+            continue
+        assert "tok-1" not in " ".join(argv)
+
+
+def test_the_refresh_resolves_the_token_once(tmp_path: Any) -> None:
+    (tmp_path / ".git").mkdir()
+    resolutions: list[int] = []
+
+    def rotating() -> str:
+        resolutions.append(1)
+        return f"tok-{len(resolutions)}"
+
+    git = RecordingGit()
+    refresh_checkout(str(tmp_path), "o/r", rotating, runner=git)
+    assert len(resolutions) == 1
+    assert git.calls[0][4] == "https://x-access-token:tok-1@github.com/o/r.git"
 
 
 def test_a_failed_fetch_fails_loudly_and_stops(tmp_path: Any) -> None:
@@ -89,11 +118,12 @@ def test_a_failed_fetch_never_leaks_the_token(tmp_path: Any) -> None:
     assert "<redacted>" in str(raised.value)
 
 
-def test_a_failed_clone_fails_loudly_and_stops(tmp_path: Any) -> None:
-    git = RecordingGit(fail_keyword="clone")
+def test_a_failed_cold_start_fails_loudly_and_stops(tmp_path: Any) -> None:
+    git = RecordingGit(fail_keyword="fetch")
     with pytest.raises(CheckoutRefreshError) as raised:
         refresh_checkout(
             str(tmp_path / "progettare"), "o/r", lambda: "tok-1", runner=git
         )
-    assert "git clone exited 1" in str(raised.value)
-    assert len(git.calls) == 1
+    assert "git fetch exited 1" in str(raised.value)
+    assert len(git.calls) == 2
+    assert "tok-1" not in str(raised.value)

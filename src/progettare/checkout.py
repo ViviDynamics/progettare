@@ -25,31 +25,38 @@ def refresh_checkout(
     token: Callable[[], str],
     runner: Callable[..., Any] = subprocess.run,
 ) -> None:
-    """Track main: fetch and reset an existing checkout, clone a missing one.
+    """Track main: fetch and reset an existing checkout, boot a missing one.
 
     The token rides the git URLs and is never written to .git/config, so a
-    checkout cloned under one ephemeral token still refreshes under every
-    token the app mints after that one expires.
+    checkout fetched under one ephemeral token still refreshes under every
+    token the app mints after that one expires. The cold start inits, then
+    fetches by explicit URL instead of cloning: clone persists its
+    credential-bearing URL in remote.origin.url, while an explicit-URL fetch
+    persists nothing, and fetching main keeps the boot on the branch the
+    receiver surveys.
     """
+    credential = token()
     if Path(repo_path, ".git").exists():
         _run(
             runner,
-            ["git", "-C", repo_path, "fetch", _authed(repository, token()), "main"],
+            ["git", "-C", repo_path, "fetch", _authed(repository, credential), "main"],
             "fetch",
-            token(),
+            credential,
         )
         _run(runner, ["git", "-C", repo_path, "reset", "--hard", "FETCH_HEAD"], "reset")
         return
+    _run(runner, ["git", "init", repo_path], "init")
     _run(
         runner,
-        ["git", "clone", _authed(repository, token()), repo_path],
-        "clone",
-        token(),
+        ["git", "-C", repo_path, "fetch", _authed(repository, credential), "main"],
+        "fetch",
+        credential,
     )
+    _run(runner, ["git", "-C", repo_path, "reset", "--hard", "FETCH_HEAD"], "reset")
     _run(
         runner,
-        ["git", "-C", repo_path, "remote", "set-url", "origin", _plain(repository)],
-        "set-url",
+        ["git", "-C", repo_path, "remote", "add", "origin", _plain(repository)],
+        "remote",
     )
 
 
