@@ -18,7 +18,8 @@ Use these stable filenames in documentation, websites, and integrations:
 | Mark master | [progettare-mark.svg](progettare-mark.svg) | Scalable SVG, transparent corners |
 | Mark raster | [progettare-mark.png](progettare-mark.png) | 1254 × 1254 PNG, transparent corners |
 
-The canonical mascot is the approved v2 illustration. The canonical mark is
+The canonical mascot is the v3 illustration with smooth fingertips matching
+the sibling mascots. The canonical mark is
 the approved v3 design with the projected ellipse. Versioned files preserve the
 design iterations; new uses should reference the canonical files above.
 

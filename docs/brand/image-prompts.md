@@ -2,8 +2,8 @@
 
 Approved canonical assets: [mascot PNG](progettare-architect.png),
 [mark SVG](progettare-mark.svg), and [mark PNG](progettare-mark.png).
-The approved mascot is v2 and the approved mark is v3. See the
-[brand guide](README.md), v2 correction record, and v3 projection correction below.
+The final mascot and mark are both v3. See the [brand guide](README.md),
+v2 correction record, and v3 projection and hand style corrections below.
 
 First concept generated 2026-10-12 using the built-in image generation tool.
 The original PNG files are unmodified outputs from the built-in image generation tool.
@@ -121,3 +121,18 @@ This revision changes only the arc geometry and its description. The mascot,
 hand, compass, palette, and background retain their v2 artwork. The PNG is a
 1254 × 1254 transparent export from CairoSVG. The SVG geometry and raster
 export were checked; no image generation was needed for this vector edit.
+
+## Mascot hand style correction (v3)
+
+The final mascot removes the two outlined thumbnails to match the smooth
+fingertips used by Scrutare and QAre. `progettare-architect-v3.png` is the
+unmodified output of a targeted built-in image edit of v2 and is also saved
+as the canonical `progettare-architect.png`. The projected-arc mark remains v3.
+
+### Prompt
+
+Use case: precise-object-edit.
+Edit target: the attached approved Progettare architect mascot.
+Make one small style correction: remove the two outlined thumbnail ovals, one on the hand holding the compass near the middle of the image and one on the hand supporting the board at the right. Fill those tiny interior oval details with the adjacent warm skin color and its existing gentle shading. The fingers should have smooth, plain surfaces without drawn nails or cuticle lines, matching the simple hand treatment of the other family mascots.
+Keep the silhouette, finger shapes, grips, dark outer contours, face, hair, glasses, expression, clothing, compass, board, plan, colors, framing and all other details exactly as in this image. Do not redesign or reposition anything.
+Preserve the transparent background and the opaque illustrated character. Output one corrected mascot PNG.
