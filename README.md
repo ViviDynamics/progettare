@@ -1,4 +1,8 @@
-# progettare
+<p align="center">
+  <img src="docs/brand/progettare-architect.png" width="240" alt="The Progettare architect, a silver-haired gentleman measuring a plan with a brass drafting compass">
+</p>
+
+# <img src="docs/brand/progettare-mark.svg" width="32" alt=""> progettare
 
 A technical-planning agent harness: bounded survey, one blueprint, ceremony
 decided by code.
