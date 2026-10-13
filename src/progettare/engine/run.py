@@ -104,6 +104,10 @@ def intake_payload(context: CardContext, written_at: str) -> dict[str, Any]:
         "clarifications": [
             {"question": c.question, "answer": c.answer} for c in context.clarifications
         ],
+        "conversation": [
+            {"author": c.author, "body": c.body, "created_at": c.created_at}
+            for c in context.conversation
+        ],
         "blocked_questions": list(context.blocked_questions),
     }
 

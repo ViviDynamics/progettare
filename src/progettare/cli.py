@@ -40,6 +40,7 @@ from progettare.engine.run import create_run_dir, write_intake
 from progettare.github import (
     Issue,
     IssueClosedError,
+    IssueComment,
     IssueFetchError,
     ensure_issue_open,
     load_issue,
@@ -118,6 +119,7 @@ def run_blueprint(
     issue: Issue,
     written_at: str,
     refresher: Callable[[], None],
+    thread: tuple[IssueComment, ...] = (),
 ) -> BlueprintOutcome:
     """Drive the ceremony stage by stage, writing artifacts as they pass.
 
@@ -125,13 +127,15 @@ def run_blueprint(
     stays testable offline: every stage here runs against the real code,
     with only the nare subprocess and the GitHub call at the seams. The
     refresher runs before each publishing stage, so an issue that closes
-    mid-run aborts the run, discards its state, and posts nothing.
+    mid-run aborts the run, discards its state, and posts nothing. The
+    thread, when given, is the conversation the intake records for the
+    blueprint stage's strategy.
     """
     run_dir = create_run_dir(runs_base, ref, Path(repo_path))
     stages: dict[str, StageLedger] = {"intake": StageLedger()}
     stage = "intake"
     try:
-        context = assemble(issue, repo_path)
+        context = assemble(issue, repo_path, thread=thread)
         write_intake(run_dir, context, written_at)
         if context.blocked_questions:
             reason = "; ".join(context.blocked_questions)
@@ -356,6 +360,12 @@ def main(argv: list[str] | None = None) -> int:
             from progettare.auth import InstallationAuth
 
             gh_auth = InstallationAuth(app_id, private_key)
+        reviewers_env = os.environ.get("PROGETTARE_REVIEWERS")
+        reviewers = (
+            frozenset(name.strip() for name in reviewers_env.split(",") if name.strip())
+            if reviewers_env
+            else None
+        )
         webhook_config = WebhookConfig(
             secret,
             os.environ.get("PROGETTARE_REPO_PATH", ""),
@@ -363,6 +373,8 @@ def main(argv: list[str] | None = None) -> int:
             os.environ.get("PROGETTARE_TRIGGER_LABEL", TRIGGER_LABEL),
             os.environ.get("PROGETTARE_RUNS_BASE"),
             gh_auth,
+            reviewers,
+            int(os.environ.get("PROGETTARE_MAX_ROUNDS", "2")),
         )
         serve_webhook(args.port, webhook_config)
         return EXIT_COMPLETE
