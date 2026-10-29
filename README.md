@@ -43,6 +43,16 @@ scrutare to review, and qare to QA.
 - **No duplicated prose in the repository.** Nothing lands in the repo but
   the readers' own products.
 
+## Triggering a run
+
+Deployed as a GitHub App, progettare starts one ceremony run per trigger
+event and posts the run's outcome as an issue comment where the card
+lives. The supported trigger today is the `progettare` label on an open
+issue: GitHub does not offer the app's bot account in any assignee picker
+and rejects assigning it through the API, so triggering by direct
+assignment is not supported (#50). A comment by an authorized reviewer
+that addresses the bot starts a bounded revision round.
+
 ## Status
 
 Design. The spec, including the staged pipeline, config reference, sizing

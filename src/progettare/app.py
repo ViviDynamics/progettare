@@ -1,9 +1,12 @@
 """The GitHub App's trigger core: one run per event, artifacts posted back.
 
-An issue assigned to the app's login, or labeled with the trigger label,
-starts exactly one ceremony run; the run's outcome is posted as an issue
-comment where the card lives, with the replay artifact attached in a
-fenced JSON block. A comment by an authorized reviewer that addresses
+An issue labeled with the trigger label starts exactly one ceremony run;
+the run's outcome is posted as an issue comment where the card lives, with
+the replay artifact attached in a fenced JSON block. Assignment is not a
+supported trigger today: GitHub offers no assignee picker for the app's
+bot account and rejects assigning it through the API (#50), so the
+assigned branch in should_trigger is unreachable, kept deliberately and
+unit tested. A comment by an authorized reviewer that addresses
 the bot starts a revision round: the ceremony reads the thread and its
 outcome names the round. The app's login and trigger label are
 configuration, not code, and the delivery ledger is what makes
@@ -106,6 +109,10 @@ def should_trigger(
         return False
     assignees = issue.get("assignees")
     if action == "assigned":
+        # Unreachable today: GitHub offers no assignee picker for the
+        # app's bot account and rejects assigning it through the API
+        # (#50). Kept deliberately, and unit tested, for the day GitHub
+        # supports bot assignment; do not remove as dead code.
         if not isinstance(assignees, list):
             return False
         return any(isinstance(a, dict) and a.get("login") == login for a in assignees)
