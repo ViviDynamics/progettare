@@ -23,7 +23,13 @@ from progettare.blueprint.stage import (
     validate_blueprint,
 )
 from progettare.config import Config, ModelRail
-from progettare.survey.nare import NARE_CONTRACT, NareError, NareResult, NareUsage
+from progettare.survey.nare import (
+    NARE_CONTRACT,
+    NARE_TIMEOUT_SECONDS,
+    NareError,
+    NareResult,
+    NareUsage,
+)
 
 RAIL = ModelRail(
     provider="openai", model="gpt-blueprint", base_url="http://127.0.0.1:8000"
@@ -181,6 +187,25 @@ def test_valid_session_writes_the_stamped_artifact(tmp_path: Path) -> None:
     assert result.blueprint.milestones[0].title == "Blueprint stage"
 
 
+def test_the_prompt_names_the_files_each_survey_answer_read(tmp_path: Path) -> None:
+    survey = make_survey()
+    survey["answers"] = [
+        {
+            "question": 1,
+            "commands": [],
+            "findings": "x.py is the file.",
+            "files": ["src/x.py", "README.md"],
+        },
+        {"question": 2, "commands": [], "findings": "no files here.", "files": []},
+    ]
+    runner = CannedRunner(make_result())
+    run_stage(runner, tmp_path, survey=survey)
+    prompt = runner.argvs[0][2]
+    assert "x.py is the file. [files read: src/x.py, README.md]" in prompt
+    assert "no files here." in prompt
+    assert "no files here. [files read" not in prompt
+
+
 def test_session_argv_carries_the_stage_contract(tmp_path: Path) -> None:
     runner = CannedRunner(make_result())
     run_stage(runner, tmp_path)
@@ -194,6 +219,8 @@ def test_session_argv_carries_the_stage_contract(tmp_path: Path) -> None:
     assert BLUEPRINT_SYSTEM_PROMPT in argv
     assert flag(argv, "--tools") == "read"
     assert flag(argv, "--contract") == str(NARE_CONTRACT)
+    assert flag(argv, "--timeout") == str(NARE_TIMEOUT_SECONDS)
+    assert "--require-cited-reads" not in argv
     schema_path = Path(flag(argv, "--schema"))
     assert schema_path == tmp_path / "blueprint.schema.json"
     assert json.loads(schema_path.read_text(encoding="utf-8")) == BLUEPRINT_SCHEMA
@@ -277,6 +304,19 @@ def test_budget_exhaustion_in_the_first_session_fails_the_run(
     assert raised.value.sessions == ("blueprint-session.json",)
     assert raised.value.usage is not None
     assert raised.value.usage.total_tokens == 15
+    assert runner.calls == 1
+    assert not (tmp_path / "blueprint.json").exists()
+
+
+def test_nares_deadline_fails_the_run_without_a_reask(tmp_path: Path) -> None:
+    runner = CannedRunner(
+        make_result(status="error", output=None, stop_reason="timeout")
+    )
+    with pytest.raises(BlueprintStageError) as raised:
+        run_stage(runner, tmp_path)
+    assert "reached nare's deadline" in str(raised.value)
+    assert raised.value.sessions == ("blueprint-session.json",)
+    assert raised.value.usage is not None
     assert runner.calls == 1
     assert not (tmp_path / "blueprint.json").exists()
 

@@ -75,7 +75,7 @@ def test_record_is_versioned_and_structured() -> None:
     assert record["questions"][0]["number"] == 1
     assert record["questions"][0]["criterion"] == "One."
     assert record["answers"] == [
-        {"question": 1, "commands": ["ls"], "findings": "found"}
+        {"question": 1, "commands": ["ls"], "findings": "found", "files": []}
     ]
 
 
@@ -167,3 +167,12 @@ def test_record_is_deterministic() -> None:
         make_plan(5), (SurveyAnswer(question=1, commands=("ls",), findings="f"),)
     )
     assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
+
+
+@pytest.mark.parametrize(
+    "path", ["", "  ", "/abs/x.py", "~/x.py", "../x.py", "a/../../b"]
+)
+def test_a_cited_path_that_is_not_repository_relative_is_refused(path: str) -> None:
+    answer = SurveyAnswer(question=1, commands=("ls",), findings="found", files=(path,))
+    with pytest.raises(SurveyRecordError, match="files names"):
+        survey_record(make_plan(5), (answer,))

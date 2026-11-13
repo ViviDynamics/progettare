@@ -19,6 +19,7 @@ from progettare.contract import ARTIFACT_VERSION, PROGETTARE_VERSION
 from progettare.survey.artifact import (
     SurveyAnswer,
     SurveyRecordError,
+    file_path_problem,
     survey_record,
     write_survey,
 )
@@ -33,12 +34,25 @@ from progettare.survey.questions import SurveyPlan, SurveyQuestion
 
 SURVEY_SYSTEM_PROMPT = (
     "You are a read-only code surveyor. Investigate the repository with "
-    "the read tool only. Answer with the JSON object the session's schema "
-    "requires. Record in commands the read trace as allowlisted command "
-    "lines, one per line you actually consulted, within the session's "
-    "budget. Write findings that answer the question concretely, naming "
-    "files and code paths."
+    "the read, list and search tools only: list a directory to find your "
+    "way, search for a name or a pattern, and read the files that answer "
+    "the question. Answer with the JSON object the session's schema "
+    "requires. Record in commands one command line per tool call you "
+    "made: a read as `cat PATH`, a list as `ls PATH`, and a search as "
+    "`grep -rn WORD PATH`, where WORD is a plain word from your pattern "
+    "with none of | $ ; & < > or a backtick in it. Write findings that "
+    "answer the question concretely, naming files and code paths. List "
+    "in files every repository-relative path your findings rely on; each "
+    "must be a file you read, not one you only saw in a list or search "
+    "result."
 )
+
+# Survey sessions navigate as well as read; every one of these is
+# read-only, confined to the checkout, and starts no process.
+SURVEY_TOOLS = ("read", "list", "search")
+
+# nare holds an answer that cites a file the session never read.
+SURVEY_CITED_READS = ("/files/*",)
 
 # The answer schema, in nare's validatable subset (type, properties,
 # required, items, additionalProperties). That subset cannot express
@@ -52,8 +66,9 @@ ANSWER_SCHEMA: dict[str, Any] = {
     "properties": {
         "commands": {"type": "array", "items": {"type": "string"}},
         "findings": {"type": "string"},
+        "files": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["commands", "findings"],
+    "required": ["commands", "findings", "files"],
     "additionalProperties": False,
 }
 
@@ -109,7 +124,19 @@ def _build_answer(output: str, number: int) -> tuple[SurveyAnswer | None, str | 
         return None, _unusable("commands is not an array of strings")
     if not isinstance(findings, str) or not findings.strip():
         return None, _unusable("findings is not a nonempty string")
-    answer = SurveyAnswer(question=number, commands=tuple(commands), findings=findings)
+    files = document.get("files")
+    if not isinstance(files, list) or not all(isinstance(path, str) for path in files):
+        return None, _unusable("files is not an array of strings")
+    for path in files:
+        problem = file_path_problem(path)
+        if problem is not None:
+            return None, _unusable(problem)
+    answer = SurveyAnswer(
+        question=number,
+        commands=tuple(commands),
+        findings=findings,
+        files=tuple(files),
+    )
     return answer, None
 
 
@@ -152,6 +179,9 @@ def answer_one_question(
         schema=str(schema_path),
         budget_tokens=budget,
         session_path=str(session_path),
+        tools=SURVEY_TOOLS,
+        cited_reads=SURVEY_CITED_READS,
+        max_tool_calls=question.command_budget,
     )
     result = runner.run(argv)
     usage = result.usage

@@ -21,6 +21,7 @@ from progettare.survey.artifact import (
     SurveyAnswer,
     SurveyRecordError,
 )
+from progettare.survey.commands import validate_session_commands
 from progettare.survey.nare import NareError, NareResult, NareUsage, session_argv
 from progettare.survey.questions import (
     RepoStructure,
@@ -74,6 +75,7 @@ VALID_OUTPUT = json.dumps(
     {
         "commands": ["cat README.md", "grep -rn survey src"],
         "findings": "cli.py loads the survey stage.",
+        "files": ["README.md", "src/cli.py"],
     }
 )
 
@@ -175,6 +177,9 @@ def test_answer_one_question_passes_the_full_session_shape_to_the_runner(
         schema=str(tmp_path / "q1.schema.json"),
         budget_tokens=400,
         session_path=str(tmp_path / "q1-session.json"),
+        tools=("read", "list", "search"),
+        cited_reads=("/files/*",),
+        max_tool_calls=QUESTION.command_budget,
     )
 
 
@@ -195,12 +200,16 @@ def test_the_written_schema_uses_only_nare_supported_keywords(
         "additionalProperties",
     }
     assert document["type"] == "object"
-    assert set(document["required"]) == {"commands", "findings"}
+    assert set(document["required"]) == {"commands", "findings", "files"}
     assert document["properties"]["commands"] == {
         "type": "array",
         "items": {"type": "string"},
     }
     assert document["properties"]["findings"] == {"type": "string"}
+    assert document["properties"]["files"] == {
+        "type": "array",
+        "items": {"type": "string"},
+    }
 
 
 def test_a_done_result_with_a_valid_output_builds_the_answer(tmp_path: Path) -> None:
@@ -209,6 +218,7 @@ def test_a_done_result_with_a_valid_output_builds_the_answer(tmp_path: Path) -> 
         question=1,
         commands=("cat README.md", "grep -rn survey src"),
         findings="cli.py loads the survey stage.",
+        files=("README.md", "src/cli.py"),
     )
     assert outcome.usage == USAGE
     assert outcome.stop_reason is None
@@ -222,6 +232,36 @@ def test_a_budget_stop_is_recorded_data(tmp_path: Path) -> None:
     assert outcome.answer is None
     assert outcome.stop_reason == "budget"
     assert outcome.usage == USAGE
+
+
+@pytest.mark.parametrize("stop_reason", ["reads_required", "timeout"])
+def test_a_reads_hold_or_nares_deadline_is_recorded_data(
+    stop_reason: str, tmp_path: Path
+) -> None:
+    # nare keeps a schema-valid output even when the run ends in error;
+    # only a done session's answer is taken.
+    runner = CannedRunner(
+        make_result(status="error", stop_reason=stop_reason, output=VALID_OUTPUT)
+    )
+    outcome = ask(runner, tmp_path)
+    assert outcome.answer is None
+    assert outcome.stop_reason == stop_reason
+    assert outcome.usage == USAGE
+
+
+def test_the_prompts_trace_shapes_pass_the_command_allowlist() -> None:
+    # The system prompt tells the model how to record each tool call; every
+    # shape it names must clear the allowlist survey_record enforces.
+    validate_session_commands(("cat src/x.py", "ls src", "grep -rn survey src"))
+    assert "`cat PATH`" in SURVEY_SYSTEM_PROMPT
+    assert "`ls PATH`" in SURVEY_SYSTEM_PROMPT
+    assert "`grep -rn WORD PATH`" in SURVEY_SYSTEM_PROMPT
+
+
+def test_a_done_answer_carries_its_files(tmp_path: Path) -> None:
+    outcome = ask(CannedRunner(make_result(output=VALID_OUTPUT)), tmp_path)
+    assert outcome.answer is not None
+    assert outcome.answer.files == ("README.md", "src/cli.py")
 
 
 def test_output_that_is_not_json_yields_an_unusable_answer(tmp_path: Path) -> None:
@@ -251,7 +291,7 @@ def test_output_that_lacks_keys_yields_an_unusable_answer(
 
 
 def test_blank_findings_yield_an_unusable_answer(tmp_path: Path) -> None:
-    payload = json.dumps({"commands": ["ls /repo"], "findings": "   "})
+    payload = json.dumps({"commands": ["ls /repo"], "findings": "   ", "files": []})
     outcome = ask(CannedRunner(make_result(output=payload)), tmp_path)
     assert_unusable(outcome)
 
@@ -259,9 +299,16 @@ def test_blank_findings_yield_an_unusable_answer(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "payload",
     [
-        '{"commands": "ls /repo", "findings": "f"}',
-        '{"commands": [1, 2], "findings": "f"}',
-        '{"commands": ["ls /repo"], "findings": 7}',
+        '{"commands": "ls /repo", "findings": "f", "files": []}',
+        '{"commands": [1, 2], "findings": "f", "files": []}',
+        '{"commands": ["ls /repo"], "findings": 7, "files": []}',
+        '{"commands": ["ls /repo"], "findings": "f"}',
+        '{"commands": ["ls /repo"], "findings": "f", "files": "a.py"}',
+        '{"commands": ["ls /repo"], "findings": "f", "files": [1]}',
+        '{"commands": ["ls /repo"], "findings": "f", "files": [""]}',
+        '{"commands": ["ls /repo"], "findings": "f", "files": ["/etc/passwd"]}',
+        '{"commands": ["ls /repo"], "findings": "f", "files": ["../other/x.py"]}',
+        '{"commands": ["ls /repo"], "findings": "f", "files": ["src/../../x"]}',
     ],
 )
 def test_payload_shape_mismatches_yield_an_unusable_answer(
@@ -390,6 +437,7 @@ def test_a_clean_stage_records_every_answer_and_stamps_the_artifact(
             "question": number,
             "commands": ["cat README.md", "grep -rn survey src"],
             "findings": "cli.py loads the survey stage.",
+            "files": ["README.md", "src/cli.py"],
         }
         for number in (1, 2, 3)
     ]
@@ -398,6 +446,7 @@ def test_a_clean_stage_records_every_answer_and_stamps_the_artifact(
             question=number,
             commands=("cat README.md", "grep -rn survey src"),
             findings="cli.py loads the survey stage.",
+            files=("README.md", "src/cli.py"),
         )
         for number in (1, 2, 3)
     )
@@ -507,7 +556,7 @@ def test_an_answer_beyond_the_command_budget_fails_the_stage_loudly(
     tmp_path: Path,
 ) -> None:
     over_budget = json.dumps(
-        {"commands": ["cat a", "cat b", "cat c"], "findings": "found"}
+        {"commands": ["cat a", "cat b", "cat c"], "findings": "found", "files": []}
     )
     runner = StageRunner([make_result(output=over_budget)])
     with pytest.raises(SurveyRecordError, match="budget of 2") as raised:
