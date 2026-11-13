@@ -308,6 +308,19 @@ def test_budget_exhaustion_in_the_first_session_fails_the_run(
     assert not (tmp_path / "blueprint.json").exists()
 
 
+def test_nares_deadline_fails_the_run_without_a_reask(tmp_path: Path) -> None:
+    runner = CannedRunner(
+        make_result(status="error", output=None, stop_reason="timeout")
+    )
+    with pytest.raises(BlueprintStageError) as raised:
+        run_stage(runner, tmp_path)
+    assert "reached nare's deadline" in str(raised.value)
+    assert raised.value.sessions == ("blueprint-session.json",)
+    assert raised.value.usage is not None
+    assert runner.calls == 1
+    assert not (tmp_path / "blueprint.json").exists()
+
+
 def test_budget_exhaustion_in_the_reask_fails_the_run(tmp_path: Path) -> None:
     runner = CannedRunner(
         make_result(output=INVALID_OUTPUT),

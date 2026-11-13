@@ -540,19 +540,28 @@ def _launch_with_ledger(
         raise NareError(str(error), sessions=sessions, usage=usage) from error
 
 
-def _fail_on_budget(
+_LIMIT_FAILURES = {
+    "budget": "exhausted its token budget",
+    "timeout": "reached nare's deadline",
+}
+
+
+def _fail_on_limit(
     result: NareResult,
     sessions: tuple[str, ...],
     usage: NareUsage | None,
 ) -> None:
-    """Budget exhaustion fails the run instead of publishing a cut-off plan.
+    """A spent budget or deadline fails the run instead of a cut-off plan.
 
-    The session that exhausted its budget already ran, so the failure
-    carries the ledger the failed-run manifest needs.
+    Neither is invalid output, so neither earns the re-ask: a session that
+    ran out of tokens or wall clock would only run out again. The session
+    already ran, so the failure carries the ledger the failed-run manifest
+    needs.
     """
-    if result.stop_reason == "budget":
+    reason = _LIMIT_FAILURES.get(result.stop_reason or "")
+    if reason is not None:
         raise BlueprintStageError(
-            "blueprint stage: the nare session exhausted its token budget",
+            f"blueprint stage: the nare session {reason}",
             sessions=sessions,
             usage=usage,
         )
@@ -635,7 +644,7 @@ def run_blueprint_stage(
     )
     if result.usage is not None:
         usages.append(result.usage)
-    _fail_on_budget(result, tuple(sessions), sum_usage(usages))
+    _fail_on_limit(result, tuple(sessions), sum_usage(usages))
     record, followup, errors = _extract(result, config.survey_max_questions)
     if followup is not None:
         return _followup_outcome(
@@ -677,7 +686,7 @@ def run_blueprint_stage(
         )
         if reask.usage is not None:
             usages.append(reask.usage)
-        _fail_on_budget(reask, tuple(sessions), sum_usage(usages))
+        _fail_on_limit(reask, tuple(sessions), sum_usage(usages))
         record, followup, errors = _extract(reask, config.survey_max_questions)
         if record is None:
             if followup is not None:

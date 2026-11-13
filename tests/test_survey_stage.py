@@ -21,6 +21,7 @@ from progettare.survey.artifact import (
     SurveyAnswer,
     SurveyRecordError,
 )
+from progettare.survey.commands import validate_session_commands
 from progettare.survey.nare import NareError, NareResult, NareUsage, session_argv
 from progettare.survey.questions import (
     RepoStructure,
@@ -178,6 +179,7 @@ def test_answer_one_question_passes_the_full_session_shape_to_the_runner(
         session_path=str(tmp_path / "q1-session.json"),
         tools=("read", "list", "search"),
         cited_reads=("/files/*",),
+        max_tool_calls=QUESTION.command_budget,
     )
 
 
@@ -247,6 +249,15 @@ def test_a_reads_hold_or_nares_deadline_is_recorded_data(
     assert outcome.usage == USAGE
 
 
+def test_the_prompts_trace_shapes_pass_the_command_allowlist() -> None:
+    # The system prompt tells the model how to record each tool call; every
+    # shape it names must clear the allowlist survey_record enforces.
+    validate_session_commands(("cat src/x.py", "ls src", "grep -rn survey src"))
+    assert "`cat PATH`" in SURVEY_SYSTEM_PROMPT
+    assert "`ls PATH`" in SURVEY_SYSTEM_PROMPT
+    assert "`grep -rn WORD PATH`" in SURVEY_SYSTEM_PROMPT
+
+
 def test_a_done_answer_carries_its_files(tmp_path: Path) -> None:
     outcome = ask(CannedRunner(make_result(output=VALID_OUTPUT)), tmp_path)
     assert outcome.answer is not None
@@ -294,6 +305,10 @@ def test_blank_findings_yield_an_unusable_answer(tmp_path: Path) -> None:
         '{"commands": ["ls /repo"], "findings": "f"}',
         '{"commands": ["ls /repo"], "findings": "f", "files": "a.py"}',
         '{"commands": ["ls /repo"], "findings": "f", "files": [1]}',
+        '{"commands": ["ls /repo"], "findings": "f", "files": [""]}',
+        '{"commands": ["ls /repo"], "findings": "f", "files": ["/etc/passwd"]}',
+        '{"commands": ["ls /repo"], "findings": "f", "files": ["../other/x.py"]}',
+        '{"commands": ["ls /repo"], "findings": "f", "files": ["src/../../x"]}',
     ],
 )
 def test_payload_shape_mismatches_yield_an_unusable_answer(

@@ -1,10 +1,12 @@
-"""The nare adapter: one bounded, read-only survey session.
+"""The nare adapter: one bounded, read-only session.
 
-progettare launches each survey question as its own `nare run` with the
-read tool confined to the surveyed repository, a token budget, and a JSON
-schema for the answer. The adapter builds that argv, executes it through
-an injectable runner boundary, and decodes nare's JSONL stdout: every
-line must parse as JSON, and the terminal `result` line is required.
+progettare launches each survey question, and the blueprint, as its own
+`nare run` with read-only tools confined to the surveyed repository (read,
+and for a survey question list and search too), a token budget, nare's
+own wall clock, and a JSON schema for the answer. The adapter builds that
+argv, executes it through an injectable runner boundary, and decodes
+nare's JSONL stdout: every line must parse as JSON, and the terminal
+`result` line is required.
 nare's field names are matched verbatim (status, stop_reason, usage with
 input/output/cache_read/cache_write/total, output), so the decode never
 guesses a shape. Budget exhaustion arrives as a nonzero exit beside a
@@ -42,6 +44,10 @@ NARE_TIMEOUT_SECONDS = SURVEY_SESSION_TIMEOUT_SECONDS - 60
 
 # The tools a session may call when its stage names none: read alone.
 READ_ONLY_TOOLS = ("read",)
+
+# Every tool a session may be offered. Each is read-only, confined to
+# --root, and starts no process; anything else is refused before launch.
+ALLOWED_TOOLS = frozenset({"read", "list", "search"})
 
 
 class NareError(RuntimeError):
@@ -129,6 +135,7 @@ def session_argv(
     session_path: str,
     tools: tuple[str, ...] = READ_ONLY_TOOLS,
     cited_reads: tuple[str, ...] = (),
+    max_tool_calls: int | None = None,
 ) -> tuple[str, ...]:
     """The argv for one bounded, read-only nare session, in nare's order.
 
@@ -136,8 +143,15 @@ def session_argv(
     of them runs a process or writes. ``cited_reads`` are JSON pointers
     into the schema answer; nare holds an answer until the session has
     read every path they find, and ends ``reads_required`` if the model
-    still cites an unread file after its correction.
+    still cites an unread file after its correction. ``max_tool_calls``
+    caps the calls the session makes; at the cap nare tells the model to
+    answer.
     """
+    if not tools or not set(tools) <= ALLOWED_TOOLS:
+        allowed = ", ".join(sorted(ALLOWED_TOOLS))
+        raise ValueError(
+            f"a session is offered read-only tools only ({allowed}), not {tools!r}"
+        )
     argv = [
         "nare",
         "run",
@@ -166,6 +180,8 @@ def session_argv(
     )
     for pointer in cited_reads:
         argv.extend(["--require-cited-reads", pointer])
+    if max_tool_calls is not None:
+        argv.extend(["--max-tool-calls", str(max_tool_calls)])
     argv.extend(
         [
             "--budget-tokens",

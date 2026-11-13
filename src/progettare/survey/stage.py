@@ -19,6 +19,7 @@ from progettare.contract import ARTIFACT_VERSION, PROGETTARE_VERSION
 from progettare.survey.artifact import (
     SurveyAnswer,
     SurveyRecordError,
+    file_path_problem,
     survey_record,
     write_survey,
 )
@@ -36,12 +37,14 @@ SURVEY_SYSTEM_PROMPT = (
     "the read, list and search tools only: list a directory to find your "
     "way, search for a name or a pattern, and read the files that answer "
     "the question. Answer with the JSON object the session's schema "
-    "requires. Record in commands the read trace as allowlisted command "
-    "lines, one per line you actually consulted, within the session's "
-    "budget. Write findings that answer the question concretely, naming "
-    "files and code paths. List in files every repository-relative path "
-    "your findings rely on; each must be a file you read, not one you only "
-    "saw in a list or search result."
+    "requires. Record in commands one command line per tool call you "
+    "made: a read as `cat PATH`, a list as `ls PATH`, and a search as "
+    "`grep -rn WORD PATH`, where WORD is a plain word from your pattern "
+    "with none of | $ ; & < > or a backtick in it. Write findings that "
+    "answer the question concretely, naming files and code paths. List "
+    "in files every repository-relative path your findings rely on; each "
+    "must be a file you read, not one you only saw in a list or search "
+    "result."
 )
 
 # Survey sessions navigate as well as read; every one of these is
@@ -124,6 +127,10 @@ def _build_answer(output: str, number: int) -> tuple[SurveyAnswer | None, str | 
     files = document.get("files")
     if not isinstance(files, list) or not all(isinstance(path, str) for path in files):
         return None, _unusable("files is not an array of strings")
+    for path in files:
+        problem = file_path_problem(path)
+        if problem is not None:
+            return None, _unusable(problem)
     answer = SurveyAnswer(
         question=number,
         commands=tuple(commands),
@@ -174,6 +181,7 @@ def answer_one_question(
         session_path=str(session_path),
         tools=SURVEY_TOOLS,
         cited_reads=SURVEY_CITED_READS,
+        max_tool_calls=question.command_budget,
     )
     result = runner.run(argv)
     usage = result.usage

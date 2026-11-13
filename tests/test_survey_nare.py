@@ -151,6 +151,38 @@ def test_session_argv_names_the_tools_and_each_cited_read_pointer() -> None:
     assert argv.index("--schema") < argv.index("--require-cited-reads")
 
 
+@pytest.mark.parametrize("tools", [(), ("read", "bash"), ("write",)])
+def test_session_argv_refuses_a_tool_that_is_not_read_only(
+    tools: tuple[str, ...],
+) -> None:
+    with pytest.raises(ValueError, match="read-only tools only"):
+        session_argv(
+            prompt="question",
+            system="system",
+            root="/repo",
+            rail=RAIL_WITHOUT_BASE_URL,
+            schema="/run/schema.json",
+            budget_tokens=10,
+            session_path="/run/session.json",
+            tools=tools,
+        )
+
+
+def test_session_argv_caps_tool_calls_only_when_asked() -> None:
+    common: dict[str, Any] = {
+        "prompt": "question",
+        "system": "system",
+        "root": "/repo",
+        "rail": RAIL_WITHOUT_BASE_URL,
+        "schema": "/run/schema.json",
+        "budget_tokens": 10,
+        "session_path": "/run/session.json",
+    }
+    assert "--max-tool-calls" not in session_argv(**common)
+    capped = session_argv(**common, max_tool_calls=8)
+    assert capped[capped.index("--max-tool-calls") + 1] == "8"
+
+
 def test_nares_deadline_lands_inside_the_subprocess_kill() -> None:
     assert 0 < NARE_TIMEOUT_SECONDS < SURVEY_SESSION_TIMEOUT_SECONDS
 

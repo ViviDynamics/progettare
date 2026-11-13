@@ -41,6 +41,22 @@ class SurveyRecordError(ValueError):
         self.usage = usage
 
 
+def file_path_problem(path: str) -> str | None:
+    """Why ``path`` is not a repository-relative file path, or None.
+
+    nare holds an answer that cites a path outside the root, so a session
+    should never produce one; this is the record's own check, so a
+    survey.json never carries a path the blueprint prompt cannot trust.
+    """
+    if not path.strip():
+        return "files names an empty path"
+    if path.startswith("/") or path.startswith("~"):
+        return f"files names {path!r}, which is not repository-relative"
+    if ".." in path.replace("\\", "/").split("/"):
+        return f"files names {path!r}, which leaves the repository"
+    return None
+
+
 @dataclass(frozen=True)
 class SurveyAnswer:
     """What one survey session did and found, as data, not conversation."""
@@ -86,6 +102,10 @@ def survey_record(
             ) from error
         if not answer.findings.strip():
             raise SurveyRecordError(f"question {answer.question} recorded no findings")
+        for path in answer.files:
+            problem = file_path_problem(path)
+            if problem is not None:
+                raise SurveyRecordError(f"question {answer.question}: {problem}")
         validated.append(
             {
                 "question": answer.question,
