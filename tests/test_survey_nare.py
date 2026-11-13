@@ -21,6 +21,7 @@ from progettare.survey.nare import (
     NareUsage,
     nare_runner,
     session_argv,
+    sum_usage,
 )
 
 RAIL = ModelRail(
@@ -225,7 +226,22 @@ def test_the_total_is_nares_own_count_including_cache_tokens() -> None:
     )
     runner = FakeRunner(stdout=f"{line}\n")
     result = nare_runner(("nare", "run", "question"), run=runner)
-    assert result.usage == NareUsage(input_tokens=10, output_tokens=5, total_tokens=435)
+    assert result.usage == NareUsage(
+        input_tokens=10,
+        output_tokens=5,
+        total_tokens=435,
+        cache_read_tokens=400,
+        cache_write_tokens=20,
+    )
+
+
+def test_sum_usage_adds_every_counter_and_is_none_for_no_sessions() -> None:
+    first = NareUsage(10, 5, 435, cache_read_tokens=400, cache_write_tokens=20)
+    second = NareUsage(1, 2, 3)
+    assert sum_usage([first, second]) == NareUsage(
+        11, 7, 438, cache_read_tokens=400, cache_write_tokens=20
+    )
+    assert sum_usage([]) is None
 
 
 def test_usage_without_a_total_raises_nare_error() -> None:

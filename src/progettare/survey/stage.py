@@ -22,7 +22,13 @@ from progettare.survey.artifact import (
     survey_record,
     write_survey,
 )
-from progettare.survey.nare import NareError, NareRunner, NareUsage, session_argv
+from progettare.survey.nare import (
+    NareError,
+    NareRunner,
+    NareUsage,
+    session_argv,
+    sum_usage,
+)
 from progettare.survey.questions import SurveyPlan, SurveyQuestion
 
 SURVEY_SYSTEM_PROMPT = (
@@ -174,19 +180,6 @@ class SurveyStageResult:
     unreported_sessions: int = 0
 
 
-def _aggregate_usage(usages: list[NareUsage]) -> NareUsage | None:
-    """The sessions' summed usage, or None when no session reported any."""
-    if not usages:
-        return None
-    input_total = sum(usage.input_tokens for usage in usages)
-    output_total = sum(usage.output_tokens for usage in usages)
-    return NareUsage(
-        input_tokens=input_total,
-        output_tokens=output_total,
-        total_tokens=sum(usage.total_tokens for usage in usages),
-    )
-
-
 def run_survey_stage(
     plan: SurveyPlan,
     runner: NareRunner,
@@ -254,7 +247,7 @@ def run_survey_stage(
             raise NareError(
                 str(error),
                 sessions=tuple(sessions),
-                usage=_aggregate_usage(usages),
+                usage=sum_usage(usages),
             ) from error
         if outcome.usage is not None:
             remaining -= outcome.usage.total_tokens
@@ -278,7 +271,7 @@ def run_survey_stage(
         raise SurveyRecordError(
             str(error),
             sessions=tuple(sessions),
-            usage=_aggregate_usage(usages),
+            usage=sum_usage(usages),
         ) from error
     stamped: dict[str, Any] = {
         "artifact": "survey",
@@ -292,7 +285,7 @@ def run_survey_stage(
     return SurveyStageResult(
         path=path,
         answers=tuple(answers),
-        usage=_aggregate_usage(usages),
+        usage=sum_usage(usages),
         partial_reasons=tuple(reasons),
         sessions=tuple(sessions),
         unreported_sessions=unreported,

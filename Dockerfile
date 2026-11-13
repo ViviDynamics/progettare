@@ -16,7 +16,8 @@ FROM python:3.12-slim
 # it, git refuses the checkout as dubious and the survey reads nothing.
 # NARE_VERSION is passed at build time by the release workflow, so an
 # image built from a tag is reproducible: a caller building by hand must
-# pass one, e.g. --build-arg NARE_VERSION=2026.10.0.
+# pass one whose `nare contract` matches progettare's NARE_CONTRACT (#62),
+# e.g. --build-arg NARE_VERSION=2026.11.104.
 ARG NARE_VERSION
 # pip and its vendored certifi from verified wheels first: the base image's pip
 # still trusts the distrusted emSign CAs (#58).

@@ -90,12 +90,26 @@ jobs:
       # and the fix is a progettare change that speaks the new contract.
       - name: Check the pinned nare speaks progettare's contract
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          version='${{ steps.derive.outputs.version }}'
+          # A rerun of a release already minted keeps the pin stored on it,
+          # which was checked when it was minted; the newest nare is not
+          # what its image installs, so it is not checked here.
+          if gh release view "$version" > /dev/null 2>&1; then
+            echo "release ${version} exists, its stored nare pin was checked at mint"
+            exit 0
+          fi
           nare_version="$(cat dist/nare.version)"
           wheel="https://github.com/ViviDynamics/nare/releases/download/${nare_version}/nare-${nare_version}-py3-none-any.whl"
           speaks="$(uv tool run --from "$wheel" nare contract | python3 -c 'import json, sys; print(json.load(sys.stdin)["contract"])')"
-          expects="$(uv run --frozen python -c 'from progettare.survey.nare import NARE_CONTRACT; print(NARE_CONTRACT)')"
+          expects="$(sed -n 's/^NARE_CONTRACT = \([0-9][0-9]*\)$/\1/p' src/progettare/survey/nare.py)"
+          if [ -z "$expects" ]; then
+            echo "NARE_CONTRACT not found in src/progettare/survey/nare.py" >&2
+            exit 1
+          fi
           if [ "$speaks" != "$expects" ]; then
             echo "nare ${nare_version} speaks contract ${speaks}, progettare speaks ${expects}" >&2
             exit 1

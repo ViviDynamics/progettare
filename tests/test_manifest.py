@@ -100,6 +100,8 @@ def test_the_ledger_names_sessions_and_usage_per_stage() -> None:
             "input_tokens": 20,
             "output_tokens": 10,
             "total_tokens": 30,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
         },
     }
     assert document["stages"]["size"] == {
