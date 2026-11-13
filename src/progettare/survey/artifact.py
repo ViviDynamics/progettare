@@ -48,6 +48,10 @@ class SurveyAnswer:
     question: int
     commands: tuple[str, ...]
     findings: str
+    # The paths the findings rely on, each read in the session (nare holds
+    # an answer that cites one it never read). Additive to the record, so
+    # a survey.json written before it has none and still reads.
+    files: tuple[str, ...] = ()
 
 
 def survey_record(
@@ -87,6 +91,7 @@ def survey_record(
                 "question": answer.question,
                 "commands": list(answer.commands),
                 "findings": answer.findings,
+                "files": list(answer.files),
             }
         )
     return {

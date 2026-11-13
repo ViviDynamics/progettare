@@ -34,6 +34,15 @@ NARE_CONTRACT = 3
 # is hung, and a hung child fails loudly here instead of stalling the stage.
 SURVEY_SESSION_TIMEOUT_SECONDS = 600
 
+# nare's own wall clock, a minute inside the kill above. At it nare stops
+# the call in flight, saves the session, and writes a result line with
+# stop_reason `timeout`, so the stage records the usage the session spent.
+# The kill stays as the backstop for a nare that hangs while stopping.
+NARE_TIMEOUT_SECONDS = SURVEY_SESSION_TIMEOUT_SECONDS - 60
+
+# The tools a session may call when its stage names none: read alone.
+READ_ONLY_TOOLS = ("read",)
+
 
 class NareError(RuntimeError):
     """A nare run progettare cannot use, named loudly.
@@ -118,8 +127,17 @@ def session_argv(
     schema: str,
     budget_tokens: int,
     session_path: str,
+    tools: tuple[str, ...] = READ_ONLY_TOOLS,
+    cited_reads: tuple[str, ...] = (),
 ) -> tuple[str, ...]:
-    """The argv for one bounded, read-only nare session, in nare's order."""
+    """The argv for one bounded, read-only nare session, in nare's order.
+
+    ``tools`` names nare's read-only tools only (read, list, search): none
+    of them runs a process or writes. ``cited_reads`` are JSON pointers
+    into the schema answer; nare holds an answer until the session has
+    read every path they find, and ends ``reads_required`` if the model
+    still cites an unread file after its correction.
+    """
     argv = [
         "nare",
         "run",
@@ -127,7 +145,7 @@ def session_argv(
         "--system",
         system,
         "--tools",
-        "read",
+        ",".join(tools),
         "--root",
         root,
         "--provider",
@@ -144,8 +162,16 @@ def session_argv(
             str(NARE_CONTRACT),
             "--schema",
             schema,
+        ]
+    )
+    for pointer in cited_reads:
+        argv.extend(["--require-cited-reads", pointer])
+    argv.extend(
+        [
             "--budget-tokens",
             str(budget_tokens),
+            "--timeout",
+            str(NARE_TIMEOUT_SECONDS),
             "--session",
             session_path,
             "--yes",

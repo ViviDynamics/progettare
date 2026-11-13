@@ -55,7 +55,11 @@ CONFIG = Config(
 )
 USAGE = NareUsage(input_tokens=10, output_tokens=5, total_tokens=15)
 SURVEY_OUTPUT = json.dumps(
-    {"commands": ["cat README.md"], "findings": "cli.py is the entry point."}
+    {
+        "commands": ["cat README.md"],
+        "findings": "cli.py is the entry point.",
+        "files": ["README.md"],
+    }
 )
 BLUEPRINT_OUTPUT = json.dumps(
     {

@@ -75,7 +75,7 @@ def test_record_is_versioned_and_structured() -> None:
     assert record["questions"][0]["number"] == 1
     assert record["questions"][0]["criterion"] == "One."
     assert record["answers"] == [
-        {"question": 1, "commands": ["ls"], "findings": "found"}
+        {"question": 1, "commands": ["ls"], "findings": "found", "files": []}
     ]
 
 

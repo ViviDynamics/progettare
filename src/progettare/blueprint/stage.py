@@ -343,7 +343,14 @@ def _findings_lines(survey: dict[str, Any]) -> list[str]:
             continue
         findings = answer.get("findings")
         if isinstance(findings, str) and findings.strip():
-            lines.append(f"(question {answer.get('question')}) {findings}")
+            line = f"(question {answer.get('question')}) {findings}"
+            # A survey.json written before files existed has none.
+            files = answer.get("files")
+            if isinstance(files, list):
+                read = [path for path in files if isinstance(path, str)]
+                if read:
+                    line = f"{line} [files read: {', '.join(read)}]"
+            lines.append(line)
     return lines
 
 

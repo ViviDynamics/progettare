@@ -16,6 +16,8 @@ import pytest
 
 from progettare.config import ModelRail
 from progettare.survey.nare import (
+    NARE_TIMEOUT_SECONDS,
+    SURVEY_SESSION_TIMEOUT_SECONDS,
     NareError,
     NareResult,
     NareUsage,
@@ -119,10 +121,38 @@ def test_session_argv_carries_every_family_flag_in_order() -> None:
         "/run/schema.json",
         "--budget-tokens",
         "1200",
+        "--timeout",
+        "540",
         "--session",
         "/run/survey-q1.json",
         "--yes",
     )
+
+
+def test_session_argv_names_the_tools_and_each_cited_read_pointer() -> None:
+    argv = session_argv(
+        prompt="question",
+        system="system",
+        root="/repo",
+        rail=RAIL_WITHOUT_BASE_URL,
+        schema="/run/schema.json",
+        budget_tokens=10,
+        session_path="/run/session.json",
+        tools=("read", "list", "search"),
+        cited_reads=("/files/*", "/other/*/path"),
+    )
+    assert argv[argv.index("--tools") + 1] == "read,list,search"
+    pointers = [
+        argv[index + 1]
+        for index, arg in enumerate(argv)
+        if arg == "--require-cited-reads"
+    ]
+    assert pointers == ["/files/*", "/other/*/path"]
+    assert argv.index("--schema") < argv.index("--require-cited-reads")
+
+
+def test_nares_deadline_lands_inside_the_subprocess_kill() -> None:
+    assert 0 < NARE_TIMEOUT_SECONDS < SURVEY_SESSION_TIMEOUT_SECONDS
 
 
 def test_session_argv_omits_base_url_when_the_rail_has_none() -> None:
