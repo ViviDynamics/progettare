@@ -83,6 +83,25 @@ jobs:
           set -euo pipefail
           gh api repos/ViviDynamics/nare/releases/latest --jq .tag_name > dist/nare.version
 
+      # nare speaks one contract version and refuses any other with exit 2,
+      # so a pin that moved past progettare's NARE_CONTRACT would ship an
+      # image whose every model session fails before it starts (#62). The
+      # check runs before anything is published: a mismatch stops the mint,
+      # and the fix is a progettare change that speaks the new contract.
+      - name: Check the pinned nare speaks progettare's contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          nare_version="$(cat dist/nare.version)"
+          wheel="https://github.com/ViviDynamics/nare/releases/download/${nare_version}/nare-${nare_version}-py3-none-any.whl"
+          speaks="$(uv tool run --from "$wheel" nare contract | python3 -c 'import json, sys; print(json.load(sys.stdin)["contract"])')"
+          expects="$(uv run --frozen python -c 'from progettare.survey.nare import NARE_CONTRACT; print(NARE_CONTRACT)')"
+          if [ "$speaks" != "$expects" ]; then
+            echo "nare ${nare_version} speaks contract ${speaks}, progettare speaks ${expects}" >&2
+            exit 1
+          fi
+          echo "nare ${nare_version} speaks contract ${speaks}, as progettare does"
+
       - name: Create GitHub release and tag
         uses: actions/github-script@v7
         env:

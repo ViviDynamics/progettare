@@ -23,7 +23,7 @@ from progettare.blueprint.stage import (
     validate_blueprint,
 )
 from progettare.config import Config, ModelRail
-from progettare.survey.nare import NareError, NareResult, NareUsage
+from progettare.survey.nare import NARE_CONTRACT, NareError, NareResult, NareUsage
 
 RAIL = ModelRail(
     provider="openai", model="gpt-blueprint", base_url="http://127.0.0.1:8000"
@@ -193,6 +193,7 @@ def test_session_argv_carries_the_stage_contract(tmp_path: Path) -> None:
     assert "x.py is the file." in prompt
     assert BLUEPRINT_SYSTEM_PROMPT in argv
     assert flag(argv, "--tools") == "read"
+    assert flag(argv, "--contract") == str(NARE_CONTRACT)
     schema_path = Path(flag(argv, "--schema"))
     assert schema_path == tmp_path / "blueprint.schema.json"
     assert json.loads(schema_path.read_text(encoding="utf-8")) == BLUEPRINT_SCHEMA
