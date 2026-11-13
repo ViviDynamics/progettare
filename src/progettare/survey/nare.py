@@ -6,9 +6,10 @@ schema for the answer. The adapter builds that argv, executes it through
 an injectable runner boundary, and decodes nare's JSONL stdout: every
 line must parse as JSON, and the terminal `result` line is required.
 nare's field names are matched verbatim (status, stop_reason, usage with
-input/output, output), so the decode never guesses a shape. Budget
-exhaustion arrives as a nonzero exit beside a parseable result line,
-which is data a caller records, not an adapter fault.
+input/output/cache_read/cache_write/total, output), so the decode never
+guesses a shape. Budget exhaustion arrives as a nonzero exit beside a
+parseable result line, which is data a caller records, not an adapter
+fault.
 """
 
 from __future__ import annotations
@@ -20,6 +21,13 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from progettare.config import ModelRail
+
+# The nare machine contract this adapter reads. nare speaks exactly one
+# version and refuses any other with exit 2 before starting, so a nare that
+# moved on fails the first session loudly instead of being mis-read. The
+# release workflow checks the nare it pins against this number before it
+# mints, so a release never ships a pair that cannot talk.
+NARE_CONTRACT = 3
 
 # A survey session is a model loop bounded by its own --budget-tokens, so a
 # legitimate run finishes well inside ten minutes; a child that outlives this
@@ -48,11 +56,32 @@ class NareError(RuntimeError):
 
 @dataclass(frozen=True)
 class NareUsage:
-    """One session's token counts. `total_tokens` is what the ledger adds."""
+    """One session's token counts. `total_tokens` is what the ledger adds.
+
+    It is nare's own `usage.total`, the number `--budget-tokens` counts:
+    nare's `input` excludes cache reads and writes, so `input + output`
+    would undercount any session that hit a prompt cache. The cache counts
+    are kept beside it, so the four counters add up to the total in run.json.
+    """
 
     input_tokens: int
     output_tokens: int
     total_tokens: int
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+
+
+def sum_usage(usages: Sequence[NareUsage]) -> NareUsage | None:
+    """The sessions' summed usage, or None when no session reported any."""
+    if not usages:
+        return None
+    return NareUsage(
+        input_tokens=sum(usage.input_tokens for usage in usages),
+        output_tokens=sum(usage.output_tokens for usage in usages),
+        total_tokens=sum(usage.total_tokens for usage in usages),
+        cache_read_tokens=sum(usage.cache_read_tokens for usage in usages),
+        cache_write_tokens=sum(usage.cache_write_tokens for usage in usages),
+    )
 
 
 @dataclass(frozen=True)
@@ -112,7 +141,7 @@ def session_argv(
             rail.model,
             "--jsonl",
             "--contract",
-            "1",
+            str(NARE_CONTRACT),
             "--schema",
             schema,
             "--budget-tokens",
@@ -149,12 +178,12 @@ def _int_field(document: dict[str, Any], key: str) -> int:
 def _decode_usage(raw: Any) -> NareUsage:
     if not isinstance(raw, dict):
         raise NareError(f"nare's usage is an unreadable shape: {raw!r}")
-    input_tokens = _int_field(raw, "input")
-    output_tokens = _int_field(raw, "output")
     return NareUsage(
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        total_tokens=input_tokens + output_tokens,
+        input_tokens=_int_field(raw, "input"),
+        output_tokens=_int_field(raw, "output"),
+        total_tokens=_int_field(raw, "total"),
+        cache_read_tokens=_int_field(raw, "cache_read"),
+        cache_write_tokens=_int_field(raw, "cache_write"),
     )
 
 

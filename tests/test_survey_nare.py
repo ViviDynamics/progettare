@@ -2,7 +2,7 @@
 
 The result lines below use nare's real field names, taken from the
 `_emit_result` shape in nare's cli.py and the `Usage` dataclass in
-nare's session.py: status, stop_reason, usage{input, output}, output.
+nare's session.py: status, stop_reason, usage{input, output, total}, output.
 All tests are offline: the subprocess seam is a fake.
 """
 
@@ -21,6 +21,7 @@ from progettare.survey.nare import (
     NareUsage,
     nare_runner,
     session_argv,
+    sum_usage,
 )
 
 RAIL = ModelRail(
@@ -38,11 +39,19 @@ def make_result_line(**overrides: Any) -> str:
         "session_id": "1a2b3c",
         "status": "done",
         "questions": [],
-        "usage": {"input": 10, "output": 5, "cache_read": 0, "cache_write": 0},
+        "usage": {
+            "input": 10,
+            "output": 5,
+            "cache_read": 0,
+            "cache_write": 0,
+            "cost": 0.0,
+            "estimated": False,
+            "total": 15,
+        },
         "stop_reason": None,
         "turns": 2,
-        "contract": 1,
-        "nare": "0.4.0",
+        "contract": 3,
+        "nare": "2026.11.104",
         "output": None,
         "error": None,
     }
@@ -105,7 +114,7 @@ def test_session_argv_carries_every_family_flag_in_order() -> None:
         "gpt-survey",
         "--jsonl",
         "--contract",
-        "1",
+        "3",
         "--schema",
         "/run/schema.json",
         "--budget-tokens",
@@ -200,6 +209,45 @@ def test_a_stdout_line_that_is_not_json_raises_nare_error() -> None:
 def test_nonzero_exit_without_a_result_line_names_the_exit() -> None:
     runner = FakeRunner(stdout="", returncode=3)
     with pytest.raises(NareError, match="exited 3"):
+        nare_runner(("nare", "run", "question"), run=runner)
+
+
+def test_the_total_is_nares_own_count_including_cache_tokens() -> None:
+    line = make_result_line(
+        usage={
+            "input": 10,
+            "output": 5,
+            "cache_read": 400,
+            "cache_write": 20,
+            "cost": 0.0,
+            "estimated": False,
+            "total": 435,
+        }
+    )
+    runner = FakeRunner(stdout=f"{line}\n")
+    result = nare_runner(("nare", "run", "question"), run=runner)
+    assert result.usage == NareUsage(
+        input_tokens=10,
+        output_tokens=5,
+        total_tokens=435,
+        cache_read_tokens=400,
+        cache_write_tokens=20,
+    )
+
+
+def test_sum_usage_adds_every_counter_and_is_none_for_no_sessions() -> None:
+    first = NareUsage(10, 5, 435, cache_read_tokens=400, cache_write_tokens=20)
+    second = NareUsage(1, 2, 3)
+    assert sum_usage([first, second]) == NareUsage(
+        11, 7, 438, cache_read_tokens=400, cache_write_tokens=20
+    )
+    assert sum_usage([]) is None
+
+
+def test_usage_without_a_total_raises_nare_error() -> None:
+    line = make_result_line(usage={"input": 10, "output": 5})
+    runner = FakeRunner(stdout=f"{line}\n")
+    with pytest.raises(NareError, match="unreadable total"):
         nare_runner(("nare", "run", "question"), run=runner)
 
 

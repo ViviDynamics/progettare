@@ -30,6 +30,7 @@ from progettare.survey.nare import (
     NareRunner,
     NareUsage,
     session_argv,
+    sum_usage,
 )
 
 BLUEPRINT_SYSTEM_PROMPT = (
@@ -468,16 +469,6 @@ class BlueprintStageResult:
     followup: FollowupRequest | None = None
 
 
-def _summed(usages: list[NareUsage]) -> NareUsage | None:
-    if not usages:
-        return None
-    return NareUsage(
-        input_tokens=sum(usage.input_tokens for usage in usages),
-        output_tokens=sum(usage.output_tokens for usage in usages),
-        total_tokens=sum(usage.total_tokens for usage in usages),
-    )
-
-
 def _write_schema(run_dir: Path) -> Path:
     schema_path = run_dir / "blueprint.schema.json"
     schema_path.write_text(
@@ -633,15 +624,15 @@ def run_blueprint_stage(
         budget,
         "blueprint-session.json",
         tuple(sessions),
-        _summed(usages),
+        sum_usage(usages),
     )
     if result.usage is not None:
         usages.append(result.usage)
-    _fail_on_budget(result, tuple(sessions), _summed(usages))
+    _fail_on_budget(result, tuple(sessions), sum_usage(usages))
     record, followup, errors = _extract(result, config.survey_max_questions)
     if followup is not None:
         return _followup_outcome(
-            followup, tuple(sessions), _summed(usages), followup_round
+            followup, tuple(sessions), sum_usage(usages), followup_round
         )
     reasked = record is None
     if record is None:
@@ -655,14 +646,14 @@ def run_blueprint_stage(
                 "blueprint stage: no budget remains for the bounded re-ask: "
                 + "; ".join(errors),
                 sessions=tuple(sessions),
-                usage=_summed(usages),
+                usage=sum_usage(usages),
             )
         reask_prompt: str
         try:
             reask_prompt = _build_prompt(intake, survey, errors)
         except BlueprintStageError as error:
             raise BlueprintStageError(
-                str(error), sessions=tuple(sessions), usage=_summed(usages)
+                str(error), sessions=tuple(sessions), usage=sum_usage(usages)
             ) from error
         sessions.append("blueprint-reask-session.json")
         reask = _launch_with_ledger(
@@ -675,22 +666,22 @@ def run_blueprint_stage(
             remaining,
             "blueprint-reask-session.json",
             tuple(sessions),
-            _summed(usages),
+            sum_usage(usages),
         )
         if reask.usage is not None:
             usages.append(reask.usage)
-        _fail_on_budget(reask, tuple(sessions), _summed(usages))
+        _fail_on_budget(reask, tuple(sessions), sum_usage(usages))
         record, followup, errors = _extract(reask, config.survey_max_questions)
         if record is None:
             if followup is not None:
                 return _followup_outcome(
-                    followup, tuple(sessions), _summed(usages), followup_round
+                    followup, tuple(sessions), sum_usage(usages), followup_round
                 )
             raise BlueprintStageError(
                 "blueprint stage: the re-asked blueprint payload is invalid: "
                 + "; ".join(errors),
                 sessions=tuple(sessions),
-                usage=_summed(usages),
+                usage=sum_usage(usages),
             )
     stamped: dict[str, Any] = {
         "artifact": "blueprint",
@@ -705,7 +696,7 @@ def run_blueprint_stage(
     return BlueprintStageResult(
         path=path,
         blueprint=record,
-        usage=_summed(usages),
+        usage=sum_usage(usages),
         reasked=reasked,
         sessions=tuple(sessions),
     )
