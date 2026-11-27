@@ -1,0 +1,24 @@
+#!/bin/sh
+# Generated for one immutable GitHub release. Run with sh on Linux or macOS.
+set -eu
+version='@VERSION@'
+nare_version='@NARE_VERSION@'
+if command -v uv >/dev/null 2>&1; then
+  uv_bin=uv
+else
+  stage=$(mktemp -d)
+  trap 'rm -rf "$stage"' EXIT
+  curl -fsSL https://astral.sh/uv/install.sh -o "$stage/uv-install.sh"
+  UV_UNMANAGED_INSTALL="$stage/bin" sh "$stage/uv-install.sh"
+  uv_bin="$stage/bin/uv"
+fi
+base=https://github.com/ViviDynamics
+"$uv_bin" tool install --python 3.12 \
+  --with "$base/nare/releases/download/$nare_version/nare-$nare_version-py3-none-any.whl" \
+  "$base/progettare/releases/download/$version/progettare-$version-py3-none-any.whl"
+
+bin_dir=$("$uv_bin" tool dir --bin)
+tool_root=$("$uv_bin" tool dir)
+test "$("$bin_dir/progettare" --version)" = "$version"
+test "$("$tool_root/progettare/bin/nare" --version)" = "$nare_version"
+printf 'Installed Progettare %s with Nare %s. Run "%s/progettare" blueprint --help\n' "$version" "$nare_version" "$bin_dir"

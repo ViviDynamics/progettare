@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 from progettare.config import ModelRail
@@ -200,6 +202,11 @@ class _Subprocess:
     """The default Runner: the real nare child process, captured."""
 
     def run(self, argv: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+        # The release installer puts its pinned nare in the same tool environment.
+        # Source checkouts and standalone installations may supply nare on PATH.
+        sibling = Path(sys.executable).with_name("nare")
+        if argv and argv[0] == "nare" and sibling.is_file():
+            argv = (str(sibling), *argv[1:])
         return subprocess.run(
             list(argv),
             capture_output=True,

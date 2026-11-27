@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -330,3 +331,19 @@ def test_a_missing_nare_executable_raises_nare_error() -> None:
 def test_a_hung_nare_session_times_out_as_a_typed_nare_error() -> None:
     with pytest.raises(NareError, match=r"timed out after 600"):
         nare_runner(("nare", "run", "question"), run=HungRunner())
+
+
+def test_installer_runtime_takes_precedence_over_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    from progettare.survey.nare import _Subprocess
+
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "python"))
+    sibling = tmp_path / "nare"
+    sibling.write_text("#!/bin/sh\nprintf 'pinned'\n")
+    sibling.chmod(0o755)
+    result = _Subprocess().run(("nare", "--version"))
+    assert result.returncode == 0
+    assert result.stdout == "pinned"

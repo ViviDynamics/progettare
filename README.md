@@ -30,6 +30,25 @@ progettare sits beside [nare](https://github.com/ViviDynamics/nare),
 project family: an orchestrator calls nare to develop, progettare to plan,
 scrutare to review, and qare to QA.
 
+## Install and plan an issue
+
+With an installer-bearing release, run:
+
+```sh
+curl -fsSL https://github.com/ViviDynamics/progettare/releases/latest/download/install.sh | sh
+```
+
+The installer verifies the CLI and its private, release-matched Nare runtime. For
+a reproducible install, replace `latest/download` with `download/<tag>`. To
+configure your checkout and run your first blueprint, follow the
+[first-run guide](docs/first-run.md) or give your coding agent this prompt:
+
+> Set up Progettare in this checkout using
+> https://github.com/ViviDynamics/progettare/blob/main/docs/first-run.md.
+> Preserve existing configuration, ask for the open issue and any missing model
+> settings, and keep credentials private. Run one blueprint and show me its
+> milestones, acceptance criteria, and generated briefs.
+
 ## Design principles
 
 - **Model proposes, code executes.** The model answers bounded questions and
@@ -55,7 +74,7 @@ that addresses the bot starts a bounded revision round.
 
 ## Status
 
-Design. The spec, including the staged pipeline, config reference, sizing
+The released CLI runs the planning pipeline. The spec, including the staged pipeline, config reference, sizing
 rules, escalation and failure paths, and milestones, is in
 [docs/SPEC.md](docs/SPEC.md).
 
