@@ -83,6 +83,18 @@ jobs:
           set -euo pipefail
           gh api repos/ViviDynamics/nare/releases/latest --jq .tag_name > dist/nare.version
 
+      - name: Prepare the release-owned installer
+        shell: bash
+        env:
+          VERSION: ${{ steps.derive.outputs.version }}
+        run: |
+          set -euo pipefail
+          nare_version="$(cat dist/nare.version)"
+          [[ "$nare_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          sed -e "s/@VERSION@/$VERSION/g" -e "s/@NARE_VERSION@/$nare_version/g" \
+            packaging/install.sh.in > dist/install.sh
+          sh -n dist/install.sh
+
       # nare speaks one contract version and refuses any other with exit 2,
       # so a pin that moved past progettare's NARE_CONTRACT would ship an
       # image whose every model session fails before it starts (#62). The
@@ -154,10 +166,10 @@ jobs:
             // shipped it as an asset called default.gitignore.
             const files = require('node:fs')
               .readdirSync('dist')
-              .filter((name) => name.endsWith('.whl') || name.endsWith('.tar.gz') || name === 'nare.version')
+              .filter((name) => name.endsWith('.whl') || name.endsWith('.tar.gz') || name === 'nare.version' || name === 'install.sh')
               .map((name) => `dist/${name}`);
-            if (files.length !== 3) {
-              throw new Error(`expected a wheel, an sdist, and nare.version in dist/, found ${files.join(', ') || 'nothing'}`);
+            if (files.length !== 4) {
+              throw new Error(`expected a wheel, an sdist, nare.version, and install.sh in dist/, found ${files.join(', ') || 'nothing'}`);
             }
             execFileSync('gh', [
               'release', 'create', version,
