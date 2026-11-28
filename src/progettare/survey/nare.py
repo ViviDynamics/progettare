@@ -31,7 +31,7 @@ from progettare.config import ModelRail
 # moved on fails the first session loudly instead of being mis-read. The
 # release workflow checks the nare it pins against this number before it
 # mints, so a release never ships a pair that cannot talk.
-NARE_CONTRACT = 3
+NARE_CONTRACT = 4
 
 # A survey session is a model loop bounded by its own --budget-tokens, so a
 # legitimate run finishes well inside ten minutes; a child that outlives this
